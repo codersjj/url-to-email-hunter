@@ -216,9 +216,15 @@ class EmailExtractor:
     async def _extract_from_page(self, page) -> Set[str]:
         """从当前页面内容提取邮箱的辅助方法"""
         try:
+            # Check if page is ready
+            ready_state = await page.evaluate('document.readyState')
+            logger.debug(f"页面状态: {ready_state}")
+            
             # 获取页面的 HTML 内容和可见文本
             page_html = await page.content()
             page_text = await page.inner_text('body')
+            
+            logger.debug(f"HTML 长度: {len(page_html)}, 文本长度: {len(page_text)}")
             
             logger.info(f"开始从 HTML 提取邮箱...")
             emails_from_html = self._extract_emails_from_text(page_html)
@@ -226,9 +232,12 @@ class EmailExtractor:
             logger.info(f"开始从可见文本提取邮箱...")
             emails_from_text = self._extract_emails_from_text(page_text)
             
-            return emails_from_html.union(emails_from_text)
+            all_emails = emails_from_html.union(emails_from_text)
+            logger.info(f"本次提取共找到 {len(all_emails)} 个邮箱")
+            
+            return all_emails
         except Exception as e:
-            logger.error(f"页面提取失败: {str(e)}")
+            logger.error(f"页面提取失败: {str(e)}", exc_info=True)
             return set()
     
     async def extract_from_url(self, url: str, callback=None) -> Set[str]:
@@ -254,7 +263,17 @@ class EmailExtractor:
                     # 超时从 60s 增加到 90s
                     await page.goto(url, wait_until='domcontentloaded', timeout=90000)
                     visited_urls.add(url)
-                    await asyncio.sleep(2)
+                    
+                    # Wait for network to be mostly idle
+                    try:
+                        logger.info("等待网络空闲...")
+                        await page.wait_for_load_state('networkidle', timeout=10000)
+                        logger.info("网络已空闲")
+                    except PlaywrightTimeout:
+                        logger.warning("网络空闲超时，继续处理")
+                    
+                    # Additional wait for any delayed scripts
+                    await asyncio.sleep(3)
                     page_loaded = True
                     
                     if callback:
@@ -269,14 +288,36 @@ class EmailExtractor:
                     else:
                         raise  # 最后一次重试失败，抛出异常
             
-            # 1. 从当前页面提取
-            current_emails = await self._extract_from_page(page)
+            # 1. 从当前页面提取（带重试机制）
+            max_extraction_attempts = 3
+            previous_emails = set()
+            
+            for attempt in range(max_extraction_attempts):
+                logger.info(f"提取尝试 {attempt + 1}/{max_extraction_attempts}")
+                current_emails = await self._extract_from_page(page)
+                
+                # 如果结果与上次相同且不是第一次，说明结果已稳定
+                if current_emails == previous_emails and attempt > 0:
+                    logger.info(f"提取结果已稳定，提前结束重试")
+                    break
+                
+                previous_emails = current_emails
+                
+                # 如果不是最后一次尝试，等待后再试
+                if attempt < max_extraction_attempts - 1:
+                    logger.info(f"等待2秒后进行下一次提取尝试...")
+                    await asyncio.sleep(2)
+            
             emails.update(current_emails)
             
             if current_emails:
                 if callback:
                     await callback('log', f"从当前页面提取到 {len(current_emails)} 个邮箱", 'success')
                     await callback('email', list(emails))
+            else:
+                logger.warning(f"未从页面提取到任何邮箱: {url}")
+                if callback:
+                    await callback('log', f"警告: 未从当前页面提取到邮箱", 'warning')
             
             # 2. 尝试查找并访问英文版页面
             english_url = await self._find_english_link(page)
