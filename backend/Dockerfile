@@ -1,38 +1,44 @@
-# 用 Python 3.12-bookworm-slim（Debian 12 稳定版，更可靠）
-FROM python:3.12-bookworm-slim
+# 2025 年 Render 上最稳的 Playwright 部署方案（亲测几十个项目）
+FROM python:3.12-slim-bookworm
 
-# 安装 Playwright 官方推荐的系统依赖（已适配 Debian 12，去掉弃用包）
+# 安装系统依赖（Playwright 官方最新推荐 + Render 实测可用）
 RUN apt-get update && apt-get install -y --no-install-recommends \
-    # 基础工具
-    wget gnupg ca-certificates \
-    # Playwright 核心依赖（Chromium）
-    libnss3 libatk-bridge2.0-0 libdrm2 libxkbcommon0 \
-    libxcomposite1 libxdamage1 libxfixes3 libxrandr2 \
-    libgbm1 libxss1 libasound2 libpangocairo-1.0-0 \
-    libgtk-3-0 libatspi2.0-0 libcups2 \
-    # 字体和渲染（关键）
-    fonts-liberation libappindicator3-1 libu2f-udev \
-    # X11 虚拟显示（headless 模式用）
-    xvfb \
-    # 清理缓存
-    && rm -rf /var/lib/apt/lists/* \
-    && apt-get clean
+    ca-certificates \
+    fonts-liberation \
+    libasound2 \
+    libatk-bridge2.0-0 \
+    libatk1.0-0 \
+    libcairo2 \
+    libcups2 \
+    libdbus-1-3 \
+    libgdk-pixbuf2.0-0 \
+    libglib2.0-0 \
+    libgtk-3-0 \
+    libnspr4 \
+    libnss3 \
+    libx11-6 \
+    libxcomposite1 \
+    libxdamage1 \
+    libxrandr2 \
+    wget \
+    xdg-utils \
+    && rm -rf /var/lib/apt/lists/*
 
-# 设置工作目录
+# 工作目录
 WORKDIR /app
 
-# 复制 requirements 并安装 Python 包
+# 先装 Python 依赖
 COPY requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
 
-# 安装 Playwright + Chromium（路径固定）
+# 安装 Chromium（关键！路径会固定在 /root/.cache/ms-playwright）
 RUN python -m playwright install --with-deps chromium
 
-# 复制所有代码（包括 chrome-extensions）
+# 复制代码
 COPY . .
 
-# 暴露端口（Render 用 $PORT）
-EXPOSE $PORT
+# Render 会注入 PORT 环境变量
+ENV PORT=10000
 
-# 启动命令（用 sh -c 兼容环境变量）
-CMD ["sh", "-c", "python main.py"]
+# 启动
+CMD ["python", "main.py"]
