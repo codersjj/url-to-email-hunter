@@ -54,7 +54,7 @@ async def websocket_endpoint(websocket: WebSocket):
                 show_browser = message.get('showBrowser', True)
                 
                 # 创建提取器
-                extractor = EmailExtractor(headless=not show_browser)
+                extractor = EmailExtractor(headless=True)
                 current_dir = os.path.dirname(os.path.abspath(__file__))
                 extension_path = os.path.join(current_dir, 'chrome-extensions', 'extracted-email-hunter-crx')
                 await extractor.initialize(extension_path)
