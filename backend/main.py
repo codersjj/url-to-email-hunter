@@ -5,13 +5,23 @@ import json
 import asyncio
 from typing import Dict
 import os
+from dotenv import load_dotenv
+
+# Load environment variables
+load_dotenv()
+
+# Get configuration from environment variables
+BACKEND_HOST = os.getenv("BACKEND_HOST", "0.0.0.0")
+# 自动从环境变量拿 PORT（Render 必须）
+BACKEND_PORT = int(os.getenv("PORT", os.getenv("BACKEND_PORT", "8000")))
+FRONTEND_URL = os.getenv("NEXT_PUBLIC_API_URL", "http://localhost:3000").replace(f":{BACKEND_PORT}", ":3000")
 
 app = FastAPI()
 
-# CORS配置
-app.add_middleware(
-    CORSMiddleware,
-    allow_origins=["http://localhost:3000"],
+# CORS配置，CORS 允许所有来源（生产最简单）或动态允许 Render 域名
+app.add_middleware(CORSMiddleware,
+    allow_origins=["*"],  # 改成 "*" 最保险！或者下面动态方式
+    # allow_origins=[FRONTEND_URL, "https://你的...
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
@@ -114,4 +124,4 @@ async def websocket_endpoint(websocket: WebSocket):
 
 if __name__ == "__main__":
     import uvicorn
-    uvicorn.run(app, host="0.0.0.0", port=8000)
+    uvicorn.run(app, host=BACKEND_HOST, port=BACKEND_PORT)

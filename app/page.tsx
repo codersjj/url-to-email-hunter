@@ -27,7 +27,8 @@ const EmailExtractorApp = () => {
 
   useEffect(() => {
     // 获取配置信息
-    fetch('http://localhost:8000/api/config')
+    const apiUrl = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000';
+    fetch(`${apiUrl}/api/config`)
       .then(res => res.json())
       .then(data => {
         if (data.fake_email_prefixes) {
@@ -52,7 +53,17 @@ const EmailExtractorApp = () => {
   };
 
   const connectWebSocket = () => {
-    const websocket = new WebSocket('ws://localhost:8000/ws');
+    // 自动根据当前页面协议生成 WebSocket 地址
+    const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
+    const apiUrl = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000';
+
+    // 从 http://xxx:8000 → ws://xxx:8000 或 wss://xxx
+    const wsBase = apiUrl.replace(/^http/, 'ws');
+    const wsUrl = `${protocol}//${new URL(wsBase).host}/ws`;
+
+    console.log('Connecting to WebSocket:', wsUrl); // 调试用
+
+    const websocket = new WebSocket(wsUrl);
 
     websocket.onopen = () => {
       addLog('WebSocket连接已建立', 'success');
