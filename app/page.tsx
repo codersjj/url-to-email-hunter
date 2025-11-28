@@ -226,7 +226,7 @@ const EmailExtractorApp = () => {
                   <button
                     onClick={startExtraction}
                     disabled={isExtracting || !urls.trim()}
-                    className="flex-1 bg-gradient-to-r from-indigo-600 to-purple-600 text-white py-3 rounded-lg font-medium hover:from-indigo-700 hover:to-purple-700 disabled:opacity-50 disabled:cursor-not-allowed transition-all flex items-center justify-center gap-2"
+                    className="flex-1 bg-gradient-to-r from-indigo-600 to-purple-600 text-white py-3 rounded-lg font-medium hover:from-indigo-700 hover:to-purple-700 disabled:opacity-50 disabled:cursor-not-allowed transition-all flex items-center justify-center gap-2 cursor-pointer"
                   >
                     <Play className="w-5 h-5" />
                     开始提取
@@ -234,7 +234,7 @@ const EmailExtractorApp = () => {
                   {isExtracting && (
                     <button
                       onClick={pauseExtraction}
-                      className="px-6 bg-yellow-500 text-white py-3 rounded-lg font-medium hover:bg-yellow-600 transition-all flex items-center gap-2"
+                      className="px-6 bg-yellow-500 text-white py-3 rounded-lg font-medium hover:bg-yellow-600 transition-all flex items-center gap-2 cursor-pointer"
                     >
                       <Pause className="w-5 h-5" />
                       {isPaused ? '继续' : '暂停'}
@@ -246,7 +246,7 @@ const EmailExtractorApp = () => {
                   <button
                     onClick={stopExtraction}
                     disabled={!isExtracting}
-                    className="flex-1 bg-red-500 text-white py-3 rounded-lg font-medium hover:bg-red-600 disabled:opacity-50 disabled:cursor-not-allowed transition-all flex items-center justify-center gap-2"
+                    className="flex-1 bg-red-500 text-white py-3 rounded-lg font-medium hover:bg-red-600 disabled:opacity-50 disabled:cursor-not-allowed transition-all flex items-center justify-center gap-2 cursor-pointer"
                   >
                     <AlertCircle className="w-5 h-5" />
                     停止
@@ -254,7 +254,7 @@ const EmailExtractorApp = () => {
                   <button
                     onClick={clearAll}
                     disabled={isExtracting}
-                    className="flex-1 bg-gray-500 text-white py-3 rounded-lg font-medium hover:bg-gray-600 disabled:opacity-50 disabled:cursor-not-allowed transition-all flex items-center justify-center gap-2"
+                    className="flex-1 bg-gray-500 text-white py-3 rounded-lg font-medium hover:bg-gray-600 disabled:opacity-50 disabled:cursor-not-allowed transition-all flex items-center justify-center gap-2 cursor-pointer"
                   >
                     <Trash2 className="w-5 h-5" />
                     清空
@@ -264,14 +264,14 @@ const EmailExtractorApp = () => {
                 <div className="flex gap-3">
                   <button
                     onClick={() => setShowBrowser(!showBrowser)}
-                    className="flex-1 bg-blue-500 text-white py-3 rounded-lg font-medium hover:bg-blue-600 transition-all flex items-center justify-center gap-2"
+                    className="flex-1 bg-blue-500 text-white py-3 rounded-lg font-medium hover:bg-blue-600 transition-all flex items-center justify-center gap-2 cursor-pointer"
                   >
                     {showBrowser ? <EyeOff className="w-5 h-5" /> : <Eye className="w-5 h-5" />}
                     {showBrowser ? '隐藏浏览器' : '显示浏览器'}
                   </button>
                   <button
                     onClick={() => setShowConfig(true)}
-                    className="px-6 bg-gray-700 text-white py-3 rounded-lg font-medium hover:bg-gray-800 transition-all flex items-center justify-center gap-2"
+                    className="px-6 bg-gray-700 text-white py-3 rounded-lg font-medium hover:bg-gray-800 transition-all flex items-center justify-center gap-2 cursor-pointer"
                   >
                     <AlertCircle className="w-5 h-5" />
                     过滤配置
@@ -348,21 +348,21 @@ const EmailExtractorApp = () => {
                 <div className="space-y-2">
                   <button
                     onClick={exportToCSV}
-                    className="w-full bg-green-500 text-white py-2 rounded-lg font-medium hover:bg-green-600 transition-all flex items-center justify-center gap-2"
+                    className="w-full bg-green-500 text-white py-2 rounded-lg font-medium hover:bg-green-600 transition-all flex items-center justify-center gap-2 cursor-pointer"
                   >
                     <Download className="w-4 h-4" />
                     导出为 CSV
                   </button>
                   <button
                     onClick={exportToExcel}
-                    className="w-full bg-blue-500 text-white py-2 rounded-lg font-medium hover:bg-blue-600 transition-all flex items-center justify-center gap-2"
+                    className="w-full bg-blue-500 text-white py-2 rounded-lg font-medium hover:bg-blue-600 transition-all flex items-center justify-center gap-2 cursor-pointer"
                   >
                     <Download className="w-4 h-4" />
                     导出为 Excel
                   </button>
                   <button
                     onClick={exportToJSON}
-                    className="w-full bg-purple-500 text-white py-2 rounded-lg font-medium hover:bg-purple-600 transition-all flex items-center justify-center gap-2"
+                    className="w-full bg-purple-500 text-white py-2 rounded-lg font-medium hover:bg-purple-600 transition-all flex items-center justify-center gap-2 cursor-pointer"
                   >
                     <Download className="w-4 h-4" />
                     导出为 JSON
@@ -382,7 +382,7 @@ const EmailExtractorApp = () => {
               <h2 className="text-xl font-bold text-gray-800">过滤配置 (Fake Email Prefixes)</h2>
               <button
                 onClick={() => setShowConfig(false)}
-                className="text-gray-500 hover:text-gray-700"
+                className="text-gray-500 hover:text-gray-700 cursor-pointer"
               >
                 <EyeOff className="w-6 h-6" />
               </button>
@@ -401,7 +401,7 @@ const EmailExtractorApp = () => {
             <div className="mt-4 text-right">
               <button
                 onClick={() => setShowConfig(false)}
-                className="px-6 py-2 bg-indigo-600 text-white rounded-lg hover:bg-indigo-700 transition-colors"
+                className="px-6 py-2 bg-indigo-600 text-white rounded-lg hover:bg-indigo-700 transition-colors cursor-pointer"
               >
                 关闭
               </button>
