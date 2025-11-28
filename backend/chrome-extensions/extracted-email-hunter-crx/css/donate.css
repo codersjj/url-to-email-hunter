@@ -1,0 +1,27 @@
+.donate-icon {
+    width: 32px;
+    height: 32px;
+    cursor: pointer;
+}
+img.donate-button:hover {
+    transform: scale(1.05);
+}
+
+.donate-div {
+    padding: 5px 5px;
+    text-align: center;
+}
+
+.donate-text {
+    font-size: 0.8rem;
+}
+
+.patreon-button {
+    height: 60px;
+    width: 290px;
+}
+
+.buymeacoffee-button {
+    height: 60px;
+    width: 217px;
+}

@@ -1,0 +1,53 @@
+<!DOCTYPE html>
+<html>
+
+<head>
+    <meta http-equiv="Content-Type" content="text/html; charset=UTF-8">
+    <link rel="stylesheet" href="../css/bootstrap.min.css">
+    <link rel="stylesheet" href="../css/style.css">
+    <script src="../utils/jquery-3.3.1.min.js"></script>
+    <script src="../utils/bootstrap.min.js"></script>
+</head>
+
+<body>
+    <div style="width:400px; margin: auto;">
+        <div class="title">
+            <img src="/img/32.png" width="32" height="32" alt="Email Hunter">
+            <label class="title-label">Email Hunter</label>
+        </div>
+
+        <div id="userAgreed">
+            <p id="userAgreedText">
+                To allow us to continue running our Email Hunter extension smoothly, please allow us to check the pages you visit.
+                We do not collect any personal data — please see our
+                <a href="https://docs.google.com/document/d/1UqcaBQLRiS44gadMRDCsfsgv4OEoYuhdW7ESAFkPa1g/"
+                    target="_blank">Privacy Policy</a>
+                for details.
+            </p>
+
+            <div class="custom-control custom-switch">
+                <input type="checkbox" class="custom-control-input" id="safeChecker" checked>
+                <label class="custom-control-label" for="safeChecker" id="safeCheckerLabel">Don't search emails on unsafe pages</label>
+            </div>
+        </div>
+
+        <!-- <div id="mellowtelAgreed">
+            <p id="mellowtelAgreedText">
+                Email Hunter includes the open-source <a href="https://www.mellowtel.it/mellowtel-user-guide/"
+                target="_blank">Mellowtel</a> library. This library lets you share your unused internet with trusted AI labs & startups who use it to train their models.<br>
+                As the developer of this extension, I get a small share of the revenue. It helps maintain this extension free and available.<br>
+                Mellowtel shares your bandwidth only. Security and privacy are 100% guaranteed, and the library is open source for everyone to see.
+                It doesn't collect, share, or sell personal information (not even anonymized data).
+            </p>
+
+            <div class="custom-control custom-switch">
+                <input type="checkbox" class="custom-control-input" id="mellowtel" checked>
+                <label class="custom-control-label" for="mellowtel" id="mellowtelLabel">Share the unused internet</label>
+            </div>
+        </div> -->
+    </div>
+</body>
+
+<script type="module" src="../options.js"></script>
+
+</html>

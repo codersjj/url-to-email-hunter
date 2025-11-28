@@ -1,0 +1,149 @@
+<!DOCTYPE html>
+<html>
+
+<head>
+    <meta http-equiv="Content-Type" content="text/html; charset=UTF-8">
+    <link rel="stylesheet" href="../css/bootstrap.min.css">
+    <link rel="stylesheet" href="../css/style.css">
+    <link rel="stylesheet" href="../css/stars.css">
+    <link rel="stylesheet" href="../css/donate.css">
+    <script src="../utils/jquery-3.3.1.min.js"></script>
+    <script src="../utils/bootstrap.min.js"></script>
+</head>
+
+<body>
+    <form>
+        <div class="title">
+            <img src="/img/32.png" width="32" height="32" alt="Email Hunter">
+            <label class="title-label">Email Hunter</label>
+            <!-- <img src="/img/like.svg" width="32" height="32" class="float-right" alt="Rate us"> -->
+            <img id="donate" src="/img/donate_1.png" alt="Donate" title="Donate"
+                class="float-right donate-icon donate-button">
+        </div>
+
+        <div id="userAgreed" style="display: none">
+            <p id="userAgreedText">
+                To allow us to continue running our Email Hunter extension smoothly, please allow us to check the pages you visit.
+                 We do not collect any personal data — please see our 
+                <a href="https://docs.google.com/document/d/1UqcaBQLRiS44gadMRDCsfsgv4OEoYuhdW7ESAFkPa1g/" target="_blank">Privacy Policy</a>
+                 for details.
+            </p>
+
+            <div class="custom-control custom-switch">
+                <input type="checkbox" class="custom-control-input" id="safeChecker" checked>
+                <label class="custom-control-label" for="safeChecker" id="safeCheckerLabel">Don't search emails on unsafe pages</label>
+            </div>
+
+            <!-- <div id="mellowtelAgreed">
+                <p id="mellowtelAgreedText">
+                    Email Hunter includes the open-source <a href="https://www.mellowtel.it/mellowtel-user-guide/"
+                    target="_blank">Mellowtel</a> library. This library lets you share your unused internet with trusted AI labs & startups who use it to train their models.<br>
+                    As the developer of this extension, I get a small share of the revenue. It helps maintain this extension free and available.<br>
+                    Mellowtel shares your bandwidth only. Security and privacy are 100% guaranteed, and the library is open source for everyone to see.
+                    It doesn't collect, share, or sell personal information (not even anonymized data).
+                </p>
+    
+                <div class="custom-control custom-switch">
+                    <input type="checkbox" class="custom-control-input" id="mellowtel" checked>
+                    <label class="custom-control-label" for="mellowtel" id="mellowtelLabel">Share the unused internet</label>
+                </div>
+            </div> -->
+
+            <button id="userAgreedYes" class="btn btn-primary">Agree and continue</button>
+        </div>
+
+        <div id="allStars" style="display: none">
+            <div id="pleaseRateUs" style="text-align:center; color:DarkOrange">Please, rate us, that's important!</div>
+            <div class="stars">
+                <input type="radio" name="star" class="star-1" id="star-1" />
+                <label class="star-1" for="star-1">1</label>
+                <input type="radio" name="star" class="star-2" id="star-2" />
+                <label class="star-2" for="star-2">2</label>
+                <input type="radio" name="star" class="star-3" id="star-3" />
+                <label class="star-3" for="star-3">3</label>
+                <input type="radio" name="star" class="star-4" id="star-4" />
+                <label class="star-4" for="star-4">4</label>
+                <input type="radio" name="star" class="star-5" id="star-5" />
+                <label class="star-5" for="star-5">5</label>
+                <span></span>
+            </div>
+        </div>
+        <div id="badEval" style="display: none; text-align:center; color:grey">Oh, Snap! Looks like we should do
+            something right now! Please drop us a line at contacts.to.send@gmail.com with your suggestions or ask any
+            question.
+        </div>
+
+        <ul class="nav nav-tabs" id="tabs" role="tablist">
+            <li class="nav-item">
+                <a class="nav-link active" id="current-tab" data-toggle="tab" href="#current" role="tab"
+                    aria-controls="current" aria-selected="true">Current page</a>
+            </li>
+
+            <li class="nav-item">
+                <a class="nav-link" id="all-tab" data-toggle="tab" href="#all" role="tab" aria-controls="all"
+                    aria-selected="false">All emails</a>
+            </li>
+
+            <li class="nav-item">
+                <a class="nav-link" id="options-tab" data-toggle="tab" href="#options" role="tab"
+                    aria-controls="options" aria-selected="false">Settings</a>
+            </li>
+        </ul>
+
+        <div class="tab-content" id="tabsContent">
+            <div class="tab-pane fade show active" id="current" role="tabpanel" aria-labelledby="current-tab">
+                <div>
+                    <div id="bingAnimate" class="icon-refresh-animate" style="display: none;">
+                        <div class="spinner-grow text-primary" role="status">
+                            <span class="sr-only">Loading...</span>
+                        </div>
+                        <div class="spinner-grow text-primary" role="status">
+                            <span class="sr-only">Loading...</span>
+                        </div>
+                        <div class="spinner-grow text-primary" role="status">
+                            <span class="sr-only">Loading...</span>
+                        </div>
+                    </div>
+                </div>
+                <div>
+                    <label id="unsafePageWarning" style="display: none; font-size: 12pt; color: red; margin-bottom: 0%;">WARNING! UNSAFE PAGE!</label>
+                    <label id="pageEmailsLabel" style="display: inline; font-size: 9pt">Page emails:</label>
+                    <textarea type="text" class="form-control" id="pageEmails" rows="8"
+                        style="font-size: 9pt"></textarea>
+
+                    <a download="CurrentPageList.txt" id="btnExport" style="display: none; font-size: 9pt;">Export</a>
+                    <a id="copyCurrentEmails" style="display: none; font-size: 9pt;" href="#">Copy</a>
+                </div>
+            </div>
+
+            <div class="tab-pane fade" id="all" role="tabpanel" aria-labelledby="all-tab">
+                <label id="allEmailsLabel" style="display: inline; font-size: 9pt">Emails from all pages:</label>
+                <textarea type="text" class="form-control" id="allEmails" rows="8" style="font-size: 9pt"></textarea>
+
+                <a download="AllCollectedEmails.txt" id="btnExportAll" style="display: none; font-size: 9pt;">Export</a>
+                <a id="copyAllEmails" style="display: none; font-size: 9pt;" href="#">Copy</a>
+                <a id="clearAllEmails" style="display: none; font-size: 9pt;" href="#">Clear</a>
+            </div>
+
+            <div class="tab-pane fade" id="options" role="tabpanel" aria-labelledby="options-tab">
+                <div class="custom-control custom-switch">
+                    <input type="checkbox" class="custom-control-input" id="autosearch">
+                    <label class="custom-control-label" for="autosearch" id="autosearchLabel">Auto search by current
+                        domain</label>
+                </div>
+                <div class="custom-control custom-switch">
+                    <input type="checkbox" class="custom-control-input" id="collectEmails" checked>
+                    <label class="custom-control-label" for="collectEmails" id="collectEmailsLabel">Keep emails from
+                        all pages</label>
+                </div>
+            </div>
+        </div>
+    </form>
+</body>
+
+<script src="../utils/tld.js"></script>
+<script type="module" src="../rate.js"></script>
+<script type="module" src="../donateButton.js"></script>
+<script type="module" src="../popup.js"></script>
+
+</html>

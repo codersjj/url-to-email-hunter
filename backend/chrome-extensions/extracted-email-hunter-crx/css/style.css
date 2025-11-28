@@ -1,0 +1,63 @@
+.title {
+    background-color: #ced4daa2;
+    padding: 5px 10px;
+    margin-bottom: 5px;
+    border-radius: 4px;
+}
+.title-label {
+    font-size: 1.2rem;
+}
+
+body {
+    padding: 5px 5px;
+    font-family: Lato, 'Open Sans', Arial, sans-serif;
+}
+
+form {
+    width: 350px;
+}
+
+form .glyphicon {
+    top: 0;
+}
+
+.dotted-line {
+    border-style: dashed;
+    color: #ced4daa2;
+    margin: 5px 0px;
+}
+ 
+.footer {
+    line-height: 0.9;
+    cursor: pointer;
+}
+
+.footer-label {
+    margin: 3px 0px 3px 5px;
+    font-size: 0.75rem;
+    font-weight: 540;
+    cursor: pointer;
+}
+
+.label-1 {
+    margin: 0px 0px 0px 5px;
+}
+
+.label-2 {
+    margin: 0px 0px 0px 5px;
+}
+
+#userAgreedText {
+    font-size: 0.9rem;
+    margin-bottom: 5px;
+}
+
+#mellowtelAgreedText {
+    font-size: 0.8rem;
+    margin-top: 15px;
+    margin-bottom: 5px;
+}
+
+#userAgreedYes {
+    margin-top: 15px;
+}

@@ -1,0 +1,32 @@
+{
+   "appDesc": {
+      "message": "Email Extractor tool that save time and efforts. Forget copying and pasting. It collects emails as you browse websites."
+   },
+   "appName": {
+      "message": "Email Hunter"
+   },
+   "appShortName": {
+      "message": "Email Hunter"
+   },
+   "autosearchLabel": {
+      "message": "Auto search by current domain"
+   },
+   "badEval": {
+      "message": "Oh, Snap! Looks like we should do something right now! Please drop us a line at contacts.to.send@gmail.com with your suggestions or ask any question."
+   },
+   "emailsFromAllPages": {
+      "message": "Emails from all pages"
+   },
+   "export": {
+      "message": "Export"
+   },
+   "keepEmailsFromAllPages": {
+      "message": "Keep emails from all pages"
+   },
+   "pageEmails": {
+      "message": "Page emails"
+   },
+   "pleaseRateUs": {
+      "message": "Please, rate us, that's important!"
+   }
+}
