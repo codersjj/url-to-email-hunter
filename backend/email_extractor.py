@@ -235,6 +235,7 @@ class EmailExtractor:
         """从单个URL提取邮箱"""
         emails = set()
         visited_urls = set()
+        max_retries = 2  # 最大重试次数
         
         try:
             if callback:
@@ -242,13 +243,31 @@ class EmailExtractor:
             
             page = await self.context.new_page()
             
-            # 访问原始 URL
-            await page.goto(url, wait_until='networkidle', timeout=60000)
-            visited_urls.add(url)
-            await asyncio.sleep(2)
+            # 访问原始 URL，带重试机制
+            retry_count = 0
+            page_loaded = False
             
-            if callback:
-                await callback('log', f"页面加载完成: {url}", 'success')
+            while retry_count < max_retries and not page_loaded:
+                try:
+                    # 使用更宽松的等待策略和更长的超时时间
+                    # domcontentloaded: DOM 加载完成即可，不等待所有资源
+                    # 超时从 60s 增加到 90s
+                    await page.goto(url, wait_until='domcontentloaded', timeout=90000)
+                    visited_urls.add(url)
+                    await asyncio.sleep(2)
+                    page_loaded = True
+                    
+                    if callback:
+                        await callback('log', f"页面加载完成: {url}", 'success')
+                        
+                except PlaywrightTimeout:
+                    retry_count += 1
+                    if retry_count < max_retries:
+                        if callback:
+                            await callback('log', f"超时，正在重试 ({retry_count}/{max_retries})...", 'warning')
+                        await asyncio.sleep(3)  # 重试前等待 3 秒
+                    else:
+                        raise  # 最后一次重试失败，抛出异常
             
             # 1. 从当前页面提取
             current_emails = await self._extract_from_page(page)
@@ -271,7 +290,8 @@ class EmailExtractor:
                         await callback('log', f"发现英文版页面，正在跳转...", 'info')
                     
                     try:
-                        await page.goto(english_url, wait_until='networkidle', timeout=30000)
+                        # 英文页面也使用更宽松的策略，但超时时间稍短
+                        await page.goto(english_url, wait_until='domcontentloaded', timeout=60000)
                         visited_urls.add(english_url)
                         await asyncio.sleep(2)
                         
@@ -289,11 +309,19 @@ class EmailExtractor:
                             if callback:
                                 await callback('log', "英文版页面未发现新邮箱", 'info')
                                 
+                    except PlaywrightTimeout:
+                        logger.warning(f"访问英文版页面超时: {english_url}")
+                        if callback:
+                            await callback('log', f"英文版页面加载超时，跳过", 'warning')
                     except Exception as e:
                         logger.warning(f"访问英文版页面失败: {str(e)}")
             
             await page.close()
             
+        except PlaywrightTimeout:
+            logger.error(f"页面加载超时（已重试 {max_retries} 次）: {url}")
+            if callback:
+                await callback('log', f"错误: {url} - 页面加载超时（已重试 {max_retries} 次），跳过该网站", 'error')
         except Exception as e:
             logger.error(f"提取 {url} 时出错: {str(e)}")
             if callback:
