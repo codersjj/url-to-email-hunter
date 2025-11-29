@@ -343,12 +343,45 @@ class EmailExtractor:
                 if callback:
                     await callback('log', f"📄 页面加载完成: {url}", 'success')
                 
-                # 记录页面信息用于调试
+                # 记录页面信息用于调试并检测验证码
                 try:
                     page_title = await page.title()
                     page_url = page.url
                     logger.info(f"页面标题: {page_title}")
                     logger.info(f"最终URL: {page_url}")
+                    
+                    # 检测是否被重定向到验证码/机器人检测页面
+                    captcha_indicators = [
+                        'captcha', 'robot', 'challenge', 'verification',
+                        'security check', 'are you human', 'prove you',
+                        'sgcaptcha', 'cloudflare', 'recaptcha'
+                    ]
+                    
+                    page_title_lower = page_title.lower()
+                    page_url_lower = page_url.lower()
+                    
+                    is_captcha = any(
+                        indicator in page_title_lower or indicator in page_url_lower
+                        for indicator in captcha_indicators
+                    )
+                    
+                    if is_captcha:
+                        error_message = f"网站启用了反爬虫验证 (CAPTCHA/Robot Challenge)"
+                        logger.warning(f"❌ {url} - {error_message}")
+                        logger.warning(f"   检测到: 标题='{page_title}', URL包含验证码路径")
+                        
+                        if callback:
+                            await callback('log', f"⚠️ {url} - 被反爬虫系统拦截", 'warning')
+                        
+                        # 直接返回失败，不继续提取
+                        return {
+                            'url': url,
+                            'emails': [],
+                            'count': 0,
+                            'success': False,
+                            'error': error_message
+                        }
+                    
                 except Exception as e:
                     logger.debug(f"获取页面信息失败: {e}")
 
