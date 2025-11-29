@@ -302,7 +302,7 @@ class EmailExtractor:
                 # 访问页面
                 try:
                     await asyncio.wait_for(
-                        page.goto(url, wait_until='networkidle', timeout=60000),
+                        page.goto(url, wait_until='domcontentloaded', timeout=60000),
                         timeout=70.0
                     )
                 except asyncio.TimeoutError:
@@ -330,7 +330,7 @@ class EmailExtractor:
                         if callback:
                             await callback('log', f"🌐 发现英文版页面,正在跳转...", 'info')
                         try:
-                            await page.goto(english_url, wait_until='networkidle', timeout=30000)
+                            await page.goto(english_url, wait_until='domcontentloaded', timeout=30000)
                             visited_urls.add(english_url)
                             await asyncio.sleep(2)
                             
