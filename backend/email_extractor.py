@@ -232,7 +232,7 @@ class EmailExtractor:
             logger.warning(f"查找英文链接出错: {str(e)}")
             return None
 
-    async def _extract_from_page(self, page) -> Set[str]:
+    async def _extract_from_page(self, page, retry_if_empty: bool = True) -> Set[str]:
         """从当前页面提取邮箱"""
         try:
             ready_state = await page.evaluate('document.readyState')
@@ -247,6 +247,23 @@ class EmailExtractor:
             emails_from_text = self._extract_emails_from_text(page_text)
             
             all_emails = emails_from_html.union(emails_from_text)
+            
+            # 如果第一次没找到邮箱，等待一下再试一次（可能是动态加载）
+            if len(all_emails) == 0 and retry_if_empty:
+                logger.debug("首次未找到邮箱，等待2秒后重试...")
+                await asyncio.sleep(2)
+                
+                # 重新获取内容
+                page_html = await page.content()
+                page_text = await page.inner_text('body')
+                
+                emails_from_html = self._extract_emails_from_text(page_html)
+                emails_from_text = self._extract_emails_from_text(page_text)
+                
+                all_emails = emails_from_html.union(emails_from_text)
+                if len(all_emails) > 0:
+                    logger.info(f"重试后找到 {len(all_emails)} 个邮箱")
+            
             logger.info(f"本次提取找到 {len(all_emails)} 个邮箱")
             
             return all_emails
@@ -299,7 +316,7 @@ class EmailExtractor:
                 # 添加随机延迟
                 await asyncio.sleep(0.5 + (hash(url) % 10) / 10)
 
-                # 访问页面
+                # 访问页面 - 使用更宽松的等待策略
                 try:
                     await asyncio.wait_for(
                         page.goto(url, wait_until='domcontentloaded', timeout=60000),
@@ -310,10 +327,30 @@ class EmailExtractor:
                     raise PlaywrightTimeout(f"访问 {url} 超时")
                 
                 visited_urls.add(url)
-                await asyncio.sleep(2)
+                
+                # 等待网络空闲 - 确保动态内容加载完成
+                try:
+                    logger.debug(f"等待网络空闲...")
+                    await page.wait_for_load_state('networkidle', timeout=10000)
+                    logger.debug(f"网络已空闲")
+                except Exception as e:
+                    logger.debug(f"网络空闲等待超时(这是正常的): {str(e)}")
+                
+                # 增加等待时间，让 JavaScript 有足够时间渲染内容
+                # 在生产环境中，资源受限可能导致 JS 执行较慢
+                await asyncio.sleep(3)
 
                 if callback:
                     await callback('log', f"📄 页面加载完成: {url}", 'success')
+                
+                # 记录页面信息用于调试
+                try:
+                    page_title = await page.title()
+                    page_url = page.url
+                    logger.info(f"页面标题: {page_title}")
+                    logger.info(f"最终URL: {page_url}")
+                except Exception as e:
+                    logger.debug(f"获取页面信息失败: {e}")
 
                 # 提取邮箱
                 current_emails = await self._extract_from_page(page)
