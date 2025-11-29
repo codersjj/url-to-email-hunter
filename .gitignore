@@ -44,3 +44,5 @@ next-env.d.ts
 # Python 缓存
 **/__pycache__/
 *.py[cod]
+tmp_user_data
+temp-data

@@ -3,14 +3,15 @@ import asyncio
 import logging
 import re
 from typing import List, Set
+import os
+import platform
+from playwright_stealth import Stealth
+import time
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
 class EmailExtractor:
-    # Common fake email prefixes to filter out (from Email Hunter extension)
-    # Note: Removed overly strict single-letter prefixes (b, c, g, h, n, o, s, y) 
-    # as they filter out valid emails like sales@, support@, etc.
     FAKE_EMAIL_PREFIXES = [
         "the", "2", "3", "4", "123", "20info", "aaa", "ab", "abc", "acc", 
         "acc_kaz", "account", "accounts", "accueil", "ad", "adi", "adm", 
@@ -24,31 +25,19 @@ class EmailExtractor:
     
     def __init__(self, headless: bool = False):
         self.headless = headless
+        self.playwright_instance = None
         self.browser = None
         self.context = None
         self.paused = False
         self.stopped = False
+        self._pages = []  # 跟踪所有打开的页面
     
     def _extract_emails_from_text(self, text: str, domain: str = None) -> Set[str]:
-        """
-        Extract and filter emails from text using Email Hunter extension's logic.
-        
-        Args:
-            text: Text content to extract emails from
-            domain: Optional domain to filter emails (only include emails from this domain)
-        
-        Returns:
-            Set of valid, filtered email addresses
-        """
+        """Extract and filter emails from text"""
         if not text:
             return set()
         
-        # Clean the text
         text = text.replace('\\n', ' ')
-        
-        # Email regex pattern from Email Hunter extension
-        # Pattern: word chars, dots, hyphens, plus signs @ domain with TLD
-        # Note: In character classes, hyphen must be escaped or placed at start/end
         pattern = r'\b[a-z\d\-][_a-z\d\-+]*(?:\.[_a-z\d\-+]*)*@[a-z\d]+[a-z\d\-]*(?:\.[a-z\d\-]+)*(?:\.[a-z]{2,63})\b'
         matches = re.findall(pattern, text, re.IGNORECASE)
         
@@ -61,124 +50,160 @@ class EmailExtractor:
         for email in matches:
             email = email.lower().strip()
             
-            # Skip if already added
             if email in valid_emails:
                 continue
             
-            # Filter by domain if specified
             if domain and domain not in email:
                 logger.debug(f"过滤邮箱 (域名不匹配): {email}")
                 filtered_count += 1
                 continue
             
-            # Filter out image and resource file extensions
-            if email.endswith(('.png', '.jpg', '.gif', '.css', '.webp', '.crx1')):
-                logger.debug(f"过滤邮箱 (图片/资源文件): {email}")
+            if email.endswith(('.png', '.jpg', '.gif', '.css', '.webp', '.crx1', '.js')):
+                logger.debug(f"过滤邮箱 (文件后缀): {email}")
                 filtered_count += 1
                 continue
             
-            if email.endswith('.js'):
-                logger.debug(f"过滤邮箱 (JS文件): {email}")
-                filtered_count += 1
-                continue
-            
-            # Clean up prefixes
             original = email
-            email = re.sub(r'^(x3|x2|u003|u0022)', '', email, flags=re.IGNORECASE)
-            email = re.sub(r'^sx_mrsp_', '', email, flags=re.IGNORECASE)
-            email = re.sub(r'^3a', '', email, flags=re.IGNORECASE)
+            email = re.sub(r'^(x3|x2|u003|u0022|sx_mrsp_|3a)', '', email, flags=re.IGNORECASE)
             
-            # If email changed but is no longer valid, skip
             if email != original and not re.search(pattern, email, re.IGNORECASE):
-                logger.debug(f"过滤邮箱 (清理前缀后无效): {original} -> {email}")
+                logger.debug(f"过滤邮箱 (清理后无效): {original}")
                 filtered_count += 1
                 continue
             
-            # Filter out common spam patterns
-            if re.search(r'(no|not)[-|_]*reply', email, re.IGNORECASE):
-                logger.debug(f"过滤邮箱 (noreply模式): {email}")
+            if re.search(r'(no|not)[-|_]*reply|mailer[-|_]*daemon|reply.+\d{5,}', email, re.IGNORECASE):
+                logger.debug(f"过滤邮箱 (spam模式): {email}")
                 filtered_count += 1
                 continue
             
-            if re.search(r'mailer[-|_]*daemon', email, re.IGNORECASE):
-                logger.debug(f"过滤邮箱 (mailer-daemon): {email}")
-                filtered_count += 1
-                continue
-            
-            if re.search(r'reply.+\d{5,}', email, re.IGNORECASE):
-                logger.debug(f"过滤邮箱 (reply+数字): {email}")
-                filtered_count += 1
-                continue
-            
-            # Filter out emails with too many consecutive digits
             if re.search(r'\d{13,}', email):
-                logger.debug(f"过滤邮箱 (过多连续数字): {email}")
+                logger.debug(f"过滤邮箱 (过多数字): {email}")
                 filtered_count += 1
                 continue
             
-            # Filter out specific domains and keywords
-            spam_keywords = [
-                'nondelivery', '@linkedin.com', '@sentry', '@linkedhelper.com',
-                'feedback', 'notification'
-            ]
+            spam_keywords = ['nondelivery', '@linkedin.com', '@sentry', '@linkedhelper.com', 'feedback', 'notification']
             if any(keyword in email for keyword in spam_keywords):
                 logger.debug(f"过滤邮箱 (垃圾关键词): {email}")
                 filtered_count += 1
                 continue
             
-            # Filter out fake email prefixes
             email_prefix = email.split('@')[0]
             if email_prefix in self.FAKE_EMAIL_PREFIXES:
-                logger.info(f"过滤邮箱 (假邮箱前缀): {email} (前缀: {email_prefix})")
+                logger.info(f"过滤邮箱 (假前缀): {email}")
                 filtered_count += 1
                 continue
             
-            # If all filters passed, add to valid emails
             if email:
-                logger.info(f"✓ 保留有效邮箱: {email}")
+                logger.info(f"✓ 有效邮箱: {email}")
                 valid_emails.add(email)
         
         if filtered_count > 0:
-            logger.info(f"总共过滤掉 {filtered_count} 个邮箱，保留 {len(valid_emails)} 个有效邮箱")
+            logger.info(f"过滤 {filtered_count} 个,保留 {len(valid_emails)} 个有效邮箱")
         
         return valid_emails
-        
+
     async def initialize(self, extension_path: str = None):
-        """初始化浏览器和插件"""
-        playwright = await async_playwright().start()
-        
-        # 启动浏览器（可选择加载Email Hunter插件）
-        if extension_path:
-            self.context = await playwright.chromium.launch_persistent_context(
-                user_data_dir='./user_data',
+        """初始化浏览器"""
+        try:
+            logger.info("开始初始化 Playwright...")
+            self.playwright_instance = await async_playwright().start()
+            
+            args = [
+                '--no-sandbox',
+                '--disable-setuid-sandbox',
+                '--disable-dev-shm-usage',
+                '--disable-gpu',
+                '--disable-blink-features=AutomationControlled',
+                '--no-first-run',
+                '--no-zygote',
+                '--disable-infobars',
+                '--start-maximized',
+                '--disable-web-security',
+                '--disable-features=IsolateOrigins,site-per-process',
+                '--disable-site-isolation-trials',
+                '--disable-features=BlockInsecurePrivateNetworkRequests',
+            ]
+
+            logger.info(f"启动浏览器 (headless={self.headless})...")
+            self.browser = await self.playwright_instance.chromium.launch(
                 headless=self.headless,
-                args=[
-                    f'--disable-extensions-except={extension_path}',
-                    f'--load-extension={extension_path}',
-                ],
-                locale='en-US',
-                timezone_id='America/New_York'
+                args=args,
             )
-            self.browser = self.context.browser
-        else:
-            self.browser = await playwright.chromium.launch(headless=self.headless)
+
+            logger.info("创建浏览器上下文...")
             self.context = await self.browser.new_context(
-                locale='en-US',
-                timezone_id='America/New_York'
+                viewport={'width': 1920, 'height': 1080},
+                locale="en-US",
+                timezone_id="America/New_York",
+                bypass_csp=True,
+                ignore_https_errors=True,
+                user_agent="Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36",
+                permissions=['geolocation'],
+                extra_http_headers={
+                    "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8,application/signed-exchange;v=b3;q=0.7",
+                    "Accept-Language": "en-US,en;q=0.9",
+                    "Accept-Encoding": "gzip, deflate, br, zstd",
+                    "sec-ch-ua": '"Google Chrome";v="131", "Chromium";v="131", "Not_A Brand";v="24"',
+                    "sec-ch-ua-mobile": "?0",
+                    "sec-ch-ua-platform": '"Windows"',
+                    "sec-fetch-dest": "document",
+                    "sec-fetch-mode": "navigate",
+                    "sec-fetch-site": "none",
+                    "sec-fetch-user": "?1",
+                    "upgrade-insecure-requests": "1",
+                },
             )
-        
-        logger.info("浏览器已启动")
-        return self
+
+            logger.info("应用 Stealth 插件...")
+            await Stealth().apply_stealth_async(self.context)
+
+            # 额外的 JavaScript 反检测
+            logger.info("注入额外的反检测脚本...")
+            await self.context.add_init_script("""
+                // 覆盖 webdriver 属性
+                Object.defineProperty(navigator, 'webdriver', {
+                    get: () => undefined
+                });
+                
+                // 覆盖 chrome 对象
+                window.chrome = {
+                    runtime: {}
+                };
+                
+                // 覆盖 permissions
+                const originalQuery = window.navigator.permissions.query;
+                window.navigator.permissions.query = (parameters) => (
+                    parameters.name === 'notifications' ?
+                        Promise.resolve({ state: Notification.permission }) :
+                        originalQuery(parameters)
+                );
+                
+                // 覆盖 plugins
+                Object.defineProperty(navigator, 'plugins', {
+                    get: () => [1, 2, 3, 4, 5]
+                });
+                
+                // 覆盖 languages
+                Object.defineProperty(navigator, 'languages', {
+                    get: () => ['en-US', 'en']
+                });
+            """)
+
+            # 验证启动
+            test_page = await self.context.new_page()
+            await test_page.close()
+            
+            logger.info(f"浏览器初始化成功 (headless={self.headless})")
+            return self
+            
+        except Exception as e:
+            logger.error(f"初始化失败: {e}", exc_info=True)
+            await self.close()
+            raise
 
     async def _find_english_link(self, page) -> str:
-        """查找页面上的英文版链接"""
+        """查找英文链接"""
         try:
-            # 查找常见的英文语言切换链接
-            # 1. 包含 "English" 或 "EN" 文本的链接
-            # 2. href 中包含 "/en/" 的链接
-            # 3. title 或 aria-label 包含 "English" 的链接
-            
-            # 使用 JavaScript 查找最可能的英文链接
             english_url = await page.evaluate("""() => {
                 const links = Array.from(document.querySelectorAll('a'));
                 for (const link of links) {
@@ -187,22 +212,16 @@ class EmailExtractor:
                     const title = (link.title || '').toLowerCase();
                     const ariaLabel = (link.getAttribute('aria-label') || '').toLowerCase();
                     
-                    // 检查文本内容
                     if (text === 'english' || text === 'en' || text.includes('english version')) {
                         return link.href;
                     }
                     
-                    // 检查属性
                     if (title.includes('english') || ariaLabel.includes('english')) {
                         return link.href;
                     }
                     
-                    // 检查 URL 结构 (作为备选，优先级较低)
-                    if (href.includes('/en/') || href.endsWith('/en')) {
-                        // 排除当前页面已经是英文版的情况
-                        if (!window.location.href.includes('/en/')) {
-                            return link.href;
-                        }
+                    if ((href.includes('/en/') || href.endsWith('/en')) && !window.location.href.includes('/en/')) {
+                        return link.href;
                     }
                 }
                 return null;
@@ -210,173 +229,192 @@ class EmailExtractor:
             
             return english_url
         except Exception as e:
-            logger.warning(f"查找英文链接时出错: {str(e)}")
+            logger.warning(f"查找英文链接出错: {str(e)}")
             return None
 
     async def _extract_from_page(self, page) -> Set[str]:
-        """从当前页面内容提取邮箱的辅助方法"""
+        """从当前页面提取邮箱"""
         try:
-            # Check if page is ready
             ready_state = await page.evaluate('document.readyState')
             logger.debug(f"页面状态: {ready_state}")
             
-            # 获取页面的 HTML 内容和可见文本
             page_html = await page.content()
             page_text = await page.inner_text('body')
             
-            logger.debug(f"HTML 长度: {len(page_html)}, 文本长度: {len(page_text)}")
+            logger.debug(f"HTML长度: {len(page_html)}, 文本长度: {len(page_text)}")
             
-            logger.info(f"开始从 HTML 提取邮箱...")
             emails_from_html = self._extract_emails_from_text(page_html)
-            
-            logger.info(f"开始从可见文本提取邮箱...")
             emails_from_text = self._extract_emails_from_text(page_text)
             
             all_emails = emails_from_html.union(emails_from_text)
-            logger.info(f"本次提取共找到 {len(all_emails)} 个邮箱")
+            logger.info(f"本次提取找到 {len(all_emails)} 个邮箱")
             
             return all_emails
         except Exception as e:
             logger.error(f"页面提取失败: {str(e)}", exc_info=True)
             return set()
     
-    async def extract_from_url(self, url: str, callback=None) -> Set[str]:
-        """从单个URL提取邮箱"""
+    async def extract_from_url(self, url: str, callback=None, max_attempts: int = 2) -> dict:
+        """从单个URL提取邮箱，返回详细结果"""
         emails = set()
         visited_urls = set()
-        max_retries = 2  # 最大重试次数
-        
-        try:
-            if callback:
-                await callback('log', f"正在访问: {url}", 'info')
-            
-            page = await self.context.new_page()
-            
-            # 访问原始 URL，带重试机制
-            retry_count = 0
-            page_loaded = False
-            
-            while retry_count < max_retries and not page_loaded:
+        page = None
+        error_message = None
+        success = False
+
+        for attempt in range(max_attempts):
+            try:
+                # 检查是否停止
+                if self.stopped:
+                    logger.info("检测到停止信号,终止提取")
+                    return {
+                        'url': url,
+                        'emails': list(emails),
+                        'count': len(emails),
+                        'success': False,
+                        'error': '用户停止'
+                    }
+                
+                # 检查浏览器上下文是否有效
+                if not self.context:
+                    logger.error("浏览器上下文不存在,无法继续")
+                    return {
+                        'url': url,
+                        'emails': list(emails),
+                        'count': 0,
+                        'success': False,
+                        'error': '浏览器上下文不存在'
+                    }
+                
+                # 显示当前尝试次数
+                attempt_msg = f"第 {attempt + 1}/{max_attempts} 次尝试"
+                if attempt > 0:
+                    attempt_msg = f"重试中 ({attempt_msg})"
+                logger.info(f"正在访问: {url} ({attempt_msg})")
+                
+                page = await self.context.new_page()
+                self._pages.append(page)
+                page.set_default_timeout(60000)
+
+                # 添加随机延迟
+                await asyncio.sleep(0.5 + (hash(url) % 10) / 10)
+
+                # 访问页面
                 try:
-                    # 使用更宽松的等待策略和更长的超时时间
-                    # domcontentloaded: DOM 加载完成即可，不等待所有资源
-                    # 超时从 60s 增加到 90s
-                    await page.goto(url, wait_until='domcontentloaded', timeout=90000)
-                    visited_urls.add(url)
-                    
-                    # Wait for network to be mostly idle
-                    try:
-                        logger.info("等待网络空闲...")
-                        await page.wait_for_load_state('networkidle', timeout=10000)
-                        logger.info("网络已空闲")
-                    except PlaywrightTimeout:
-                        logger.warning("网络空闲超时，继续处理")
-                    
-                    # Additional wait for any delayed scripts
-                    await asyncio.sleep(3)
-                    page_loaded = True
-                    
-                    if callback:
-                        await callback('log', f"页面加载完成: {url}", 'success')
-                        
-                except PlaywrightTimeout:
-                    retry_count += 1
-                    if retry_count < max_retries:
-                        if callback:
-                            await callback('log', f"超时，正在重试 ({retry_count}/{max_retries})...", 'warning')
-                        await asyncio.sleep(3)  # 重试前等待 3 秒
-                    else:
-                        raise  # 最后一次重试失败，抛出异常
-            
-            # 1. 从当前页面提取（带重试机制）
-            max_extraction_attempts = 3
-            previous_emails = set()
-            
-            for attempt in range(max_extraction_attempts):
-                logger.info(f"提取尝试 {attempt + 1}/{max_extraction_attempts}")
+                    await asyncio.wait_for(
+                        page.goto(url, wait_until='networkidle', timeout=60000),
+                        timeout=70.0
+                    )
+                except asyncio.TimeoutError:
+                    logger.warning(f"访问 {url} 总超时(70秒)")
+                    raise PlaywrightTimeout(f"访问 {url} 超时")
+                
+                visited_urls.add(url)
+                await asyncio.sleep(2)
+
+                if callback:
+                    await callback('log', f"📄 页面加载完成: {url}", 'success')
+
+                # 提取邮箱
                 current_emails = await self._extract_from_page(page)
-                
-                # 如果结果与上次相同且不是第一次，说明结果已稳定
-                if current_emails == previous_emails and attempt > 0:
-                    logger.info(f"提取结果已稳定，提前结束重试")
-                    break
-                
-                previous_emails = current_emails
-                
-                # 如果不是最后一次尝试，等待后再试
-                if attempt < max_extraction_attempts - 1:
-                    logger.info(f"等待2秒后进行下一次提取尝试...")
-                    await asyncio.sleep(2)
-            
-            emails.update(current_emails)
-            
-            if current_emails:
-                if callback:
-                    await callback('log', f"从当前页面提取到 {len(current_emails)} 个邮箱", 'success')
+                emails.update(current_emails)
+
+                if current_emails and callback:
+                    await callback('log', f"📧 从当前页面提取到 {len(current_emails)} 个邮箱", 'success')
                     await callback('email', list(emails))
-            else:
-                logger.warning(f"未从页面提取到任何邮箱: {url}")
-                if callback:
-                    await callback('log', f"警告: 未从当前页面提取到邮箱", 'warning')
-            
-            # 2. 尝试查找并访问英文版页面
-            english_url = await self._find_english_link(page)
-            
-            # 如果找到了英文链接，且该链接未被访问过，且当前页面似乎不是英文版
-            if english_url and english_url not in visited_urls:
-                # 简单的检查：如果当前 URL 已经包含 /en/，可能不需要跳转
-                if '/en/' not in url:
-                    logger.info(f"发现英文版链接，尝试跳转: {english_url}")
-                    if callback:
-                        await callback('log', f"发现英文版页面，正在跳转...", 'info')
-                    
-                    try:
-                        # 英文页面也使用更宽松的策略，但超时时间稍短
-                        await page.goto(english_url, wait_until='domcontentloaded', timeout=60000)
-                        visited_urls.add(english_url)
-                        await asyncio.sleep(2)
-                        
-                        # 从英文页面提取
-                        english_page_emails = await self._extract_from_page(page)
-                        new_emails = english_page_emails - emails
-                        
-                        if new_emails:
-                            emails.update(new_emails)
-                            logger.info(f"从英文版页面额外提取到 {len(new_emails)} 个邮箱")
-                            if callback:
-                                await callback('log', f"从英文版页面额外提取到 {len(new_emails)} 个邮箱", 'success')
-                                await callback('email', list(emails))
-                        else:
-                            if callback:
-                                await callback('log', "英文版页面未发现新邮箱", 'info')
-                                
-                    except PlaywrightTimeout:
-                        logger.warning(f"访问英文版页面超时: {english_url}")
+
+                # 尝试英文版
+                if not self.stopped:
+                    english_url = await self._find_english_link(page)
+                    if english_url and english_url not in visited_urls and '/en/' not in url:
                         if callback:
-                            await callback('log', f"英文版页面加载超时，跳过", 'warning')
+                            await callback('log', f"🌐 发现英文版页面,正在跳转...", 'info')
+                        try:
+                            await page.goto(english_url, wait_until='networkidle', timeout=30000)
+                            visited_urls.add(english_url)
+                            await asyncio.sleep(2)
+                            
+                            english_page_emails = await self._extract_from_page(page)
+                            new_emails = english_page_emails - emails
+                            if new_emails:
+                                emails.update(new_emails)
+                                if callback:
+                                    await callback('log', f"📧 从英文版额外提取到 {len(new_emails)} 个邮箱", 'success')
+                                    await callback('email', list(emails))
+                        except Exception as e:
+                            logger.warning(f"访问英文版失败: {str(e)}")
+
+                # 成功
+                success = True
+                if attempt > 0 and callback:
+                    await callback('log', f"✅ 重试成功 (第 {attempt + 1} 次尝试)", 'success')
+                break
+
+            except PlaywrightTimeout as e:
+                error_message = f"访问超时"
+                is_last_attempt = (attempt == max_attempts - 1)
+                current_attempt = attempt + 1
+                
+                if is_last_attempt:
+                    logger.error(f"访问 {url} 最终失败: 超时 (第 {current_attempt}/{max_attempts} 次尝试)")
+                    if callback:
+                        await callback('log', f"❌ 访问失败: {url} - 超时 (第 {current_attempt}/{max_attempts} 次尝试)", 'error')
+                else:
+                    next_attempt = current_attempt + 1
+                    logger.warning(f"访问 {url} 第 {current_attempt} 次尝试超时，准备第 {next_attempt} 次尝试")
+                    if callback:
+                        await callback('log', f"⚠️ 第 {current_attempt} 次尝试超时，准备第 {next_attempt} 次尝试...", 'warning')
+                    await asyncio.sleep(2)
+                    
+            except Exception as e:
+                error_message = str(e)
+                logger.error(f"提取 {url} 出错: {str(e)}", exc_info=True)
+                if callback:
+                    await callback('log', f"❌ 错误: {url} - {str(e)}", 'error')
+                # 非超时错误不重试，直接跳出
+                break
+                
+            finally:
+                # 确保页面被关闭
+                if page:
+                    try:
+                        if not page.is_closed():
+                            await page.close()
+                            logger.debug(f"页面已关闭: {url}")
+                        if page in self._pages:
+                            self._pages.remove(page)
                     except Exception as e:
-                        logger.warning(f"访问英文版页面失败: {str(e)}")
-            
-            await page.close()
-            
-        except PlaywrightTimeout:
-            logger.error(f"页面加载超时（已重试 {max_retries} 次）: {url}")
-            if callback:
-                await callback('log', f"错误: {url} - 页面加载超时（已重试 {max_retries} 次），跳过该网站", 'error')
-        except Exception as e:
-            logger.error(f"提取 {url} 时出错: {str(e)}")
-            if callback:
-                await callback('log', f"错误: {url} - {str(e)}", 'error')
-        
-        return emails
+                        logger.warning(f"关闭页面时出错: {e}")
+                        if page in self._pages:
+                            self._pages.remove(page)
+
+        # 最终结果日志
+        email_count = len(emails)
+        if callback and not success:  # 成功的情况在循环内已经处理
+            if email_count > 0:
+                await callback('log', f"⚠️ {url} - 部分成功，提取到 {email_count} 个邮箱", 'warning')
+            else:
+                await callback('log', f"❌ {url} - 失败: {error_message}", 'error')
+
+        return {
+            'url': url,
+            'emails': list(emails),
+            'count': email_count,
+            'success': success,
+            'error': error_message if not success else None
+        }
     
-    async def extract_from_urls(self, urls: List[str], callback=None) -> List[str]:
-        """批量提取邮箱"""
+    async def extract_from_urls(self, urls: List[str], callback=None) -> dict:
+        """批量提取邮箱，返回详细统计信息"""
         all_emails = set()
         total = len(urls)
+        failed_urls = []
+        no_email_urls = []
+        
+        logger.info(f"开始批量提取 {total} 个URL")
         
         for index, url in enumerate(urls):
-            # 检查是否暂停或停止
+            # 检查暂停/停止
             while self.paused and not self.stopped:
                 await asyncio.sleep(0.5)
             
@@ -385,21 +423,65 @@ class EmailExtractor:
                     await callback('log', '提取已停止', 'warning')
                 break
             
+            logger.info(f"📊 处理进度: {index + 1}/{total} - {url}")
+            
+            if callback:
+                await callback('log', f"🔍 正在处理 [{index + 1}/{total}]: {url[:50]}...", 'info')
+            
             # 提取邮箱
-            emails = await self.extract_from_url(url, callback)
-            all_emails.update(emails)
+            try:
+                result = await self.extract_from_url(url, callback)
+                
+                # 更新总邮箱列表
+                all_emails.update(result['emails'])
+                
+                # 跟踪失败和无邮箱的URL
+                if not result['success']:
+                    failed_urls.append({
+                        'url': url,
+                        'error': result['error'] or '未知错误',
+                        'timestamp': time.time()
+                    })
+                elif result['count'] == 0:
+                    no_email_urls.append({
+                        'url': url,
+                        'timestamp': time.time()
+                    })
+                    
+            except Exception as e:
+                logger.error(f"处理 {url} 时出错: {e}")
+                failed_urls.append({
+                    'url': url,
+                    'error': str(e),
+                    'timestamp': time.time()
+                })
+                if callback:
+                    await callback('log', f"❌ 跳过 {url}: {str(e)}", 'error')
             
             # 更新进度
             progress = int((index + 1) / total * 100)
             if callback:
                 await callback('progress', progress)
         
+        # 发送统计信息
         if callback:
-            await callback('log', f"提取完成！共 {len(all_emails)} 个唯一邮箱", 'success')
-            await callback('complete', list(all_emails))
+            await callback('failed_urls', failed_urls)
+            await callback('no_email_urls', no_email_urls)
         
-        print("all_emails:", all_emails)
-        return list(all_emails)
+        if callback and not self.stopped:
+            await callback('log', f"✅ 提取完成!共 {len(all_emails)} 个唯一邮箱", 'success')
+            await callback('log', f"📊 统计: 成功 {total - len(failed_urls)} 个, 失败 {len(failed_urls)} 个, 无邮箱 {len(no_email_urls)} 个", 'info')
+
+        
+        logger.info(f"批量提取完成: {len(all_emails)} 个邮箱, {len(failed_urls)} 个失败, {len(no_email_urls)} 个无邮箱")
+        
+        return {
+            'emails': list(all_emails),
+            'failed_urls': failed_urls,
+            'no_email_urls': no_email_urls,
+            'total_processed': total,
+            'total_emails': len(all_emails)
+        }
     
     def pause(self):
         """暂停提取"""
@@ -414,12 +496,78 @@ class EmailExtractor:
     def stop(self):
         """停止提取"""
         self.stopped = True
+        self.paused = False
         logger.info("提取已停止")
     
     async def close(self):
-        """关闭浏览器"""
-        if self.context:
-            await self.context.close()
-        if self.browser:
-            await self.browser.close()
-        logger.info("浏览器已关闭")
+        """彻底关闭浏览器"""
+        logger.info("开始关闭浏览器资源...")
+        
+        # 设置停止标志,防止新操作
+        self.stopped = True
+        
+        try:
+            # 1. 关闭所有打开的页面
+            if self._pages:
+                logger.info(f"关闭 {len(self._pages)} 个打开的页面...")
+                pages_to_close = self._pages[:]  # 创建副本
+                for page in pages_to_close:
+                    try:
+                        if not page.is_closed():
+                            await asyncio.wait_for(page.close(), timeout=5.0)
+                            logger.debug(f"页面已关闭")
+                    except asyncio.TimeoutError:
+                        logger.warning(f"关闭页面超时")
+                    except Exception as e:
+                        logger.warning(f"关闭页面出错: {e}")
+                self._pages.clear()
+                logger.info("所有页面已关闭")
+            
+            # 2. 关闭上下文
+            if self.context:
+                try:
+                    await asyncio.wait_for(self.context.close(), timeout=10.0)
+                    logger.info("BrowserContext 已关闭")
+                except asyncio.TimeoutError:
+                    logger.warning("关闭 context 超时")
+                except Exception as e:
+                    logger.warning(f"关闭 context 时出错: {e}")
+                finally:
+                    self.context = None
+            
+            # 3. 关闭浏览器
+            if self.browser:
+                try:
+                    await asyncio.wait_for(self.browser.close(), timeout=10.0)
+                    logger.info("Browser 已关闭")
+                except asyncio.TimeoutError:
+                    logger.warning("关闭 browser 超时")
+                except Exception as e:
+                    logger.warning(f"关闭 browser 时出错: {e}")
+                finally:
+                    self.browser = None
+            
+            # 4. 停止 Playwright
+            if self.playwright_instance:
+                try:
+                    await asyncio.wait_for(self.playwright_instance.stop(), timeout=10.0)
+                    logger.info("Playwright 已停止")
+                except asyncio.TimeoutError:
+                    logger.warning("停止 playwright 超时")
+                except Exception as e:
+                    logger.warning(f"停止 playwright 时出错: {e}")
+                finally:
+                    self.playwright_instance = None
+            
+            # 5. 重置状态
+            self.stopped = False
+            self.paused = False
+            
+            # 6. 等待资源完全释放
+            await asyncio.sleep(1.0)  # 增加到1秒确保完全释放
+            
+            logger.info("浏览器资源已完全释放")
+            
+        except Exception as e:
+            logger.error(f"关闭浏览器时出错: {e}", exc_info=True)
+        

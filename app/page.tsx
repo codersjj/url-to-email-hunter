@@ -3,11 +3,23 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { Upload, Download, Play, Pause, Trash2, Eye, EyeOff, Mail, CheckCircle, AlertCircle } from 'lucide-react';
 import * as XLSX from 'xlsx';
+import StatsPanel from './components/stats-panel';
 
 interface LogEntry {
   timestamp: string;
   message: string;
   type: 'info' | 'success' | 'error' | 'warning';
+}
+
+interface FailedUrl {
+  url: string;
+  error: string;
+  timestamp: number;
+}
+
+interface NoEmailUrl {
+  url: string;
+  timestamp: number;
 }
 
 const EmailExtractorApp = () => {
@@ -20,7 +32,10 @@ const EmailExtractorApp = () => {
   const [emails, setEmails] = useState<string[]>([]);
   const [showBrowser, setShowBrowser] = useState(true);
   const [ws, setWs] = useState<WebSocket | null>(null);
-  const logsEndRef = useRef<HTMLDivElement>(null);
+  const [failedUrls, setFailedUrls] = useState<FailedUrl[]>([]);
+  const [noEmailUrls, setNoEmailUrls] = useState<NoEmailUrl[]>([]);
+
+  const logsContainerRef = useRef<HTMLDivElement>(null);
 
   const [fakePrefixes, setFakePrefixes] = useState<string[]>([]);
   const [showConfig, setShowConfig] = useState(false);
@@ -44,7 +59,9 @@ const EmailExtractorApp = () => {
   }, [urls]);
 
   useEffect(() => {
-    logsEndRef.current?.scrollIntoView({ behavior: 'smooth' });
+    if (logsContainerRef.current) {
+      logsContainerRef.current.scrollTop = logsContainerRef.current.scrollHeight;
+    }
   }, [logs]);
 
   const addLog = (message: string, type: LogEntry['type'] = 'info') => {
@@ -83,8 +100,12 @@ const EmailExtractorApp = () => {
           const newEmails = [...prev, ...data.emails];
           return [...new Set(newEmails)];
         });
+      } else if (data.type === 'failed_urls') {
+        setFailedUrls(data.failed_urls || []);
+      } else if (data.type === 'no_email_urls') {
+        setNoEmailUrls(data.no_email_urls || []);
       } else if (data.type === 'complete') {
-        addLog('邮箱提取完成！', 'success');
+        addLog(data.message || '任务完成', 'success');
         setIsExtracting(false);
       } else if (data.type === 'error') {
         addLog(`错误: ${data.message}`, 'error');
@@ -112,6 +133,8 @@ const EmailExtractorApp = () => {
     setIsExtracting(true);
     setProgress(0);
     setEmails([]);
+    setFailedUrls([]);
+    setNoEmailUrls([]);
     addLog('开始提取流程...', 'info');
 
     const websocket = connectWebSocket();
@@ -174,8 +197,6 @@ const EmailExtractorApp = () => {
     addLog(`已导出 ${emails.length} 个邮箱到CSV`, 'success');
   };
 
-
-
   const exportToExcel = () => {
     const data = emails.map(email => ({ Email: email }));
     const worksheet = XLSX.utils.json_to_sheet(data);
@@ -195,6 +216,31 @@ const EmailExtractorApp = () => {
     addLog(`已导出 ${emails.length} 个邮箱到JSON`, 'success');
   };
 
+  const exportFailedUrlsToExcel = () => {
+    const data = failedUrls.map(item => ({
+      'URL': item.url,
+      '错误原因': item.error,
+      '时间戳': new Date(item.timestamp * 1000).toLocaleString('zh-CN')
+    }));
+    const worksheet = XLSX.utils.json_to_sheet(data);
+    const workbook = XLSX.utils.book_new();
+    XLSX.utils.book_append_sheet(workbook, worksheet, "Failed URLs");
+    XLSX.writeFile(workbook, `failed_urls_${Date.now()}.xlsx`);
+    addLog(`已导出 ${failedUrls.length} 个失败URL到Excel`, 'success');
+  };
+
+  const exportNoEmailUrlsToExcel = () => {
+    const data = noEmailUrls.map(item => ({
+      'URL': item.url,
+      '时间戳': new Date(item.timestamp * 1000).toLocaleString('zh-CN')
+    }));
+    const worksheet = XLSX.utils.json_to_sheet(data);
+    const workbook = XLSX.utils.book_new();
+    XLSX.utils.book_append_sheet(workbook, worksheet, "No Email URLs");
+    XLSX.writeFile(workbook, `no_email_urls_${Date.now()}.xlsx`);
+    addLog(`已导出 ${noEmailUrls.length} 个无邮箱URL到Excel`, 'success');
+  };
+
   return (
     <div className="min-h-screen bg-gradient-to-br from-blue-50 via-indigo-50 to-purple-50 p-6">
       <div className="max-w-7xl mx-auto">
@@ -203,10 +249,9 @@ const EmailExtractorApp = () => {
           <div className="flex items-center justify-center gap-3 mb-2">
             <Mail className="w-10 h-10 text-indigo-600" />
             <h1 className="text-4xl font-bold bg-gradient-to-r from-indigo-600 to-purple-600 bg-clip-text text-transparent">
-              批量URL邮箱提取工具
+              URL To Email Hunter
             </h1>
           </div>
-          <p className="text-gray-600">基于 Playwright + Email Hunter 自动化提取</p>
         </div>
 
         <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
@@ -274,13 +319,6 @@ const EmailExtractorApp = () => {
 
                 <div className="flex gap-3">
                   <button
-                    onClick={() => setShowBrowser(!showBrowser)}
-                    className="flex-1 bg-blue-500 text-white py-3 rounded-lg font-medium hover:bg-blue-600 transition-all flex items-center justify-center gap-2 cursor-pointer"
-                  >
-                    {showBrowser ? <EyeOff className="w-5 h-5" /> : <Eye className="w-5 h-5" />}
-                    {showBrowser ? '隐藏浏览器' : '显示浏览器'}
-                  </button>
-                  <button
                     onClick={() => setShowConfig(true)}
                     className="px-6 bg-gray-700 text-white py-3 rounded-lg font-medium hover:bg-gray-800 transition-all flex items-center justify-center gap-2 cursor-pointer"
                   >
@@ -315,23 +353,101 @@ const EmailExtractorApp = () => {
           <div className="space-y-6">
             {/* Logs */}
             <div className="bg-white rounded-xl shadow-lg p-6">
-              <h2 className="text-xl font-semibold text-gray-800 mb-4">实时日志</h2>
-              <div className="bg-gray-900 rounded-lg p-4 h-64 overflow-y-auto font-mono text-sm">
-                {logs.map((log, index) => (
-                  <div key={index} className="mb-1">
-                    <span className="text-gray-500">[{log.timestamp}]</span>
-                    <span className={`ml-2 ${log.type === 'success' ? 'text-green-400' :
-                      log.type === 'error' ? 'text-red-400' :
-                        log.type === 'warning' ? 'text-yellow-400' :
-                          'text-blue-400'
-                      }`}>
-                      {log.message}
-                    </span>
-                  </div>
-                ))}
-                <div ref={logsEndRef} />
+              <div className="flex items-center justify-between mb-4">
+                <h2 className="text-xl font-semibold text-gray-800">实时日志</h2>
+                <span className="px-3 py-1 bg-gray-100 text-gray-700 rounded-full text-xs font-medium">
+                  共 {logs.length} 条
+                </span>
+              </div>
+              <div
+                ref={logsContainerRef}
+                className="bg-gray-900 rounded-lg p-4 h-64 overflow-y-auto font-mono text-sm"
+              >
+                {logs.length === 0 ? (
+                  <p className="text-gray-500 text-center py-8">等待日志输出...</p>
+                ) : (
+                  logs.map((log, index) => (
+                    <div key={index} className="hover:bg-gray-800 p-1.5 rounded transition-colors">
+                      <div className="flex items-start gap-2">
+                        <div className="flex-1 min-w-0">
+                          <span className="text-gray-500 text-xs">[{log.timestamp}]</span>
+                          <span className={`ml-2 ${log.type === 'success' ? 'text-green-400' :
+                            log.type === 'error' ? 'text-red-400' :
+                              log.type === 'warning' ? 'text-yellow-400' :
+                                'text-blue-400'
+                            }`}>
+                            {log.message}
+                          </span>
+                        </div>
+                      </div>
+                    </div>
+                  ))
+                )}
               </div>
             </div>
+
+            {/* Statistics Panel */}
+            {isExtracting && (
+              <StatsPanel
+                logs={logs}
+                emails={emails}
+                failedUrls={failedUrls}
+                noEmailUrls={noEmailUrls}
+              />
+            )}
+
+            {/* Failed URLs Section */}
+            {failedUrls.length > 0 && (
+              <div className="bg-white rounded-xl shadow-lg p-6">
+                <div className="flex items-center justify-between mb-4">
+                  <h2 className="text-xl font-semibold text-red-600">失败 URL</h2>
+                  <span className="px-3 py-1 bg-red-100 text-red-700 rounded-full text-sm font-medium">
+                    {failedUrls.length} 个
+                  </span>
+                </div>
+                <div className="bg-red-50 rounded-lg p-4 h-32 overflow-y-auto mb-4 text-sm">
+                  {failedUrls.map((item, index) => (
+                    <div key={index} className="mb-2 last:mb-0 border-b border-red-100 last:border-0 pb-2 last:pb-0">
+                      <div className="font-medium text-red-800 truncate">{item.url}</div>
+                      <div className="text-red-500 text-xs mt-1">{item.error}</div>
+                    </div>
+                  ))}
+                </div>
+                <button
+                  onClick={exportFailedUrlsToExcel}
+                  className="w-full bg-red-500 text-white py-2 rounded-lg font-medium hover:bg-red-600 transition-all flex items-center justify-center gap-2 cursor-pointer"
+                >
+                  <Download className="w-4 h-4" />
+                  导出失败记录
+                </button>
+              </div>
+            )}
+
+            {/* No Email URLs Section */}
+            {noEmailUrls.length > 0 && (
+              <div className="bg-white rounded-xl shadow-lg p-6">
+                <div className="flex items-center justify-between mb-4">
+                  <h2 className="text-xl font-semibold text-yellow-600">无邮箱 URL</h2>
+                  <span className="px-3 py-1 bg-yellow-100 text-yellow-700 rounded-full text-sm font-medium">
+                    {noEmailUrls.length} 个
+                  </span>
+                </div>
+                <div className="bg-yellow-50 rounded-lg p-4 h-32 overflow-y-auto mb-4 text-sm">
+                  {noEmailUrls.map((item, index) => (
+                    <div key={index} className="mb-1 last:mb-0 text-yellow-800 truncate">
+                      {item.url}
+                    </div>
+                  ))}
+                </div>
+                <button
+                  onClick={exportNoEmailUrlsToExcel}
+                  className="w-full bg-yellow-500 text-white py-2 rounded-lg font-medium hover:bg-yellow-600 transition-all flex items-center justify-center gap-2 cursor-pointer"
+                >
+                  <Download className="w-4 h-4" />
+                  导出无邮箱记录
+                </button>
+              </div>
+            )}
 
             {/* Results */}
             <div className="bg-white rounded-xl shadow-lg p-6">
