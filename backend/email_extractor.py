@@ -375,8 +375,8 @@ class EmailExtractor:
                     logger.debug(f"网络空闲等待超时(这是正常的): {str(e)}")
                 
                 # 增加等待时间，让 JavaScript 有足够时间渲染内容
-                # 在生产环境中，资源受限可能导致 JS 执行较慢
-                await asyncio.sleep(3)
+                # 在生产环境中，资源受限可能导致 JS 执行较慢，但 3秒可能太长
+                await asyncio.sleep(1)
 
                 if callback:
                     await callback('log', f"📄 页面加载完成: {url}", 'success')
@@ -564,8 +564,10 @@ class EmailExtractor:
         
         start_time = time.time()
         
-        # 限制并发数
-        sem = asyncio.Semaphore(20)
+        # 限制并发数 - 从环境变量获取，默认为 3 (适合 Render 等容器环境)
+        max_concurrency = int(os.getenv("MAX_CONCURRENCY", "3"))
+        logger.info(f"并发限制: {max_concurrency}")
+        sem = asyncio.Semaphore(max_concurrency)
         
         # 进度计数器
         completed_count = 0
