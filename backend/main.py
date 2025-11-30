@@ -19,6 +19,8 @@ load_dotenv()
 BACKEND_HOST = os.getenv("BACKEND_HOST", "0.0.0.0")
 BACKEND_PORT = int(os.getenv("PORT", os.getenv("BACKEND_PORT", "8000")))
 FRONTEND_URL = os.getenv("NEXT_PUBLIC_API_URL", "http://localhost:3000").replace(f":{BACKEND_PORT}", ":3000")
+USE_PROXY = os.getenv("USE_PROXY", "false").lower() == "true"
+logger.info(f"配置: USE_PROXY={USE_PROXY} (智能代理回退)")
 
 app = FastAPI()
 
@@ -78,7 +80,9 @@ async def health_check():
     """健康检查"""
     return {
         "status": "ok",
-        "active_sessions": len(active_extractors)
+        "active_sessions": len(active_extractors),
+        "use_proxy": USE_PROXY,
+        "proxy_mode": "smart_fallback" if USE_PROXY else "disabled"
     }
 
 @app.websocket("/ws")
@@ -111,10 +115,10 @@ async def websocket_endpoint(websocket: WebSocket):
                 # show_browser = message.get('showBrowser', True)
                 show_browser = False
                 
-                logger.info(f"创建新的提取器实例: {session_id}, headless={not show_browser}")
+                logger.info(f"创建新的提取器实例: {session_id}, headless={not show_browser}, use_proxy_fallback={USE_PROXY}")
                 
-                # 创建新提取器
-                extractor = EmailExtractor(headless=not show_browser)
+                # 创建新提取器（启用智能代理回退）
+                extractor = EmailExtractor(headless=not show_browser, use_proxy=USE_PROXY)
                 
                 try:
                     await extractor.initialize()

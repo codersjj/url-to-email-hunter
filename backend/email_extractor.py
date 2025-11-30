@@ -2,11 +2,12 @@ from playwright.async_api import async_playwright, TimeoutError as PlaywrightTim
 import asyncio
 import logging
 import re
-from typing import List, Set
+from typing import List, Set, Optional
 import os
 import platform
 from playwright_stealth import Stealth
 import time
+from free_proxy_manager import get_proxy_manager
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
@@ -23,14 +24,19 @@ class EmailExtractor:
         "firstname.lastname", "your.name", "unsubscribe"
     ]
     
-    def __init__(self, headless: bool = False):
+    
+    def __init__(self, headless: bool = False, use_proxy: bool = False):
         self.headless = headless
+        self.use_proxy_fallback = use_proxy  # 改名：失败时才使用代理
+        self.proxy_manager = get_proxy_manager(use_proxy=use_proxy) if use_proxy else None
+        self.current_proxy = None
         self.playwright_instance = None
         self.browser = None
         self.context = None
         self.paused = False
         self.stopped = False
         self._pages = []  # 跟踪所有打开的页面
+        self._failed_urls_needing_proxy = set()  # 记录需要代理的URL
     
     def _extract_emails_from_text(self, text: str, domain: str = None) -> Set[str]:
         """Extract and filter emails from text"""
@@ -102,7 +108,7 @@ class EmailExtractor:
         
         return valid_emails
 
-    async def initialize(self, extension_path: str = None):
+    async def initialize(self, extension_path: str = None, use_proxy: bool = False):
         """初始化浏览器"""
         try:
             logger.info("开始初始化 Playwright...")
@@ -131,6 +137,22 @@ class EmailExtractor:
             )
 
             logger.info("创建浏览器上下文...")
+            
+            # 获取代理配置 - 支持动态切换
+            proxy_config = None
+            if use_proxy and self.proxy_manager:
+                self.current_proxy = self.proxy_manager.get_random_proxy()
+                if self.current_proxy:
+                    proxy_config = self.current_proxy
+                    logger.info(f"✓ 使用代理: {proxy_config['server']}")
+                else:
+                    logger.warning("⚠ 代理管理器未返回代理，使用直连")
+            else:
+                if use_proxy:
+                    logger.warning("⚠ 请求使用代理但代理管理器未初始化，使用直连")
+                else:
+                    logger.info("⚠ 使用直连（不使用代理）")
+            
             self.context = await self.browser.new_context(
                 viewport={'width': 1920, 'height': 1080},
                 locale="en-US",
@@ -139,6 +161,7 @@ class EmailExtractor:
                 ignore_https_errors=True,
                 user_agent="Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36",
                 permissions=['geolocation'],
+                proxy=proxy_config,  # 应用代理配置
                 extra_http_headers={
                     "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8,application/signed-exchange;v=b3;q=0.7",
                     "Accept-Language": "en-US,en;q=0.9",
@@ -370,17 +393,25 @@ class EmailExtractor:
                         logger.warning(f"❌ {url} - {error_message}")
                         logger.warning(f"   检测到: 标题='{page_title}', URL包含验证码路径")
                         
-                        if callback:
-                            await callback('log', f"⚠️ {url} - 被反爬虫系统拦截", 'warning')
-                        
-                        # 直接返回失败，不继续提取
-                        return {
-                            'url': url,
-                            'emails': [],
-                            'count': 0,
-                            'success': False,
-                            'error': error_message
-                        }
+                        # 如果启用了代理回退且这是第一次尝试，触发重试
+                        if self.use_proxy_fallback and attempt == 0:
+                            logger.info(f"🔄 将使用代理重试: {url}")
+                            if callback:
+                                await callback('log', f"🔄 检测到CAPTCHA，将使用代理重试...", 'warning')
+                            # 抛出异常触发重试
+                            raise Exception("CAPTCHA_DETECTED_RETRY_WITH_PROXY")
+                        else:
+                            # 已经用过代理或未启用代理回退，直接失败
+                            if callback:
+                                await callback('log', f"⚠️ {url} - 被反爬虫系统拦截", 'warning')
+                            
+                            return {
+                                'url': url,
+                                'emails': [],
+                                'count': 0,
+                                'success': False,
+                                'error': error_message
+                            }
                     
                 except Exception as e:
                     logger.debug(f"获取页面信息失败: {e}")
@@ -438,11 +469,36 @@ class EmailExtractor:
                     
             except Exception as e:
                 error_message = str(e)
-                logger.error(f"提取 {url} 出错: {str(e)}", exc_info=True)
-                if callback:
-                    await callback('log', f"❌ 错误: {url} - {str(e)}", 'error')
-                # 非超时错误不重试，直接跳出
-                break
+                
+                # 检查是否是 CAPTCHA 触发的重试
+                if "CAPTCHA_DETECTED_RETRY_WITH_PROXY" in error_message and attempt == 0:
+                    logger.info(f"🔄 检测到CAPTCHA，准备使用代理重试...")
+                    
+                    # 关闭当前浏览器上下文
+                    try:
+                        await self.close()
+                        await asyncio.sleep(1)
+                    except:
+                        pass
+                    
+                    # 使用代理重新初始化
+                    try:
+                        await self.initialize(use_proxy=True)
+                        logger.info(f"✓ 已使用代理重新初始化浏览器")
+                        if callback:
+                            await callback('log', f"✓ 已切换到代理模式，重新尝试...", 'info')
+                        # 继续下一次循环（使用代理重试）
+                        continue
+                    except Exception as init_error:
+                        logger.error(f"使用代理重新初始化失败: {init_error}")
+                        error_message = f"代理初始化失败: {str(init_error)}"
+                        break
+                else:
+                    logger.error(f"提取 {url} 出错: {str(e)}", exc_info=True)
+                    if callback:
+                        await callback('log', f"❌ 错误: {url} - {str(e)}", 'error')
+                    # 非CAPTCHA错误不重试，直接跳出
+                    break
                 
             finally:
                 # 确保页面被关闭
