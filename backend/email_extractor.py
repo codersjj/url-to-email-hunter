@@ -355,14 +355,8 @@ class EmailExtractor:
                 await asyncio.sleep(0.5 + (hash(url) % 10) / 10)
 
                 # 访问页面 - 使用更宽松的等待策略
-                try:
-                    await asyncio.wait_for(
-                        page.goto(url, wait_until='domcontentloaded', timeout=60000),
-                        timeout=70.0
-                    )
-                except asyncio.TimeoutError:
-                    logger.warning(f"访问 {url} 总超时(70秒)")
-                    raise PlaywrightTimeout(f"访问 {url} 超时")
+                # 移除 asyncio.wait_for，直接使用 Playwright 的 timeout，避免 Future exception was never retrieved 错误
+                await page.goto(url, wait_until='domcontentloaded', timeout=60000)
                 
                 visited_urls.add(url)
                 
