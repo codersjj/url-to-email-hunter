@@ -349,14 +349,18 @@ class EmailExtractor:
                 
                 page = await current_context.new_page()
                 self._pages.append(page)
-                page.set_default_timeout(60000)
+                
+                # 获取超时设置，默认为 60000ms (60秒)
+                # 在 Render 等慢速环境中，较长的超时时间可以减少因网络波动导致的失败
+                page_timeout = int(os.getenv("PAGE_TIMEOUT", "60000"))
+                page.set_default_timeout(page_timeout)
 
                 # 添加随机延迟
                 await asyncio.sleep(0.5 + (hash(url) % 10) / 10)
 
                 # 访问页面 - 使用更宽松的等待策略
                 # 移除 asyncio.wait_for，直接使用 Playwright 的 timeout，避免 Future exception was never retrieved 错误
-                await page.goto(url, wait_until='domcontentloaded', timeout=60000)
+                await page.goto(url, wait_until='domcontentloaded', timeout=page_timeout)
                 
                 visited_urls.add(url)
                 
@@ -440,7 +444,11 @@ class EmailExtractor:
                         if callback:
                             await callback('log', f"🌐 发现英文版页面,正在跳转...", 'info')
                         try:
-                            await page.goto(english_url, wait_until='domcontentloaded', timeout=30000)
+                            # 英文版页面跳转超时设为主要超时的一半，但至少 10秒
+                            # 注意：这里重新获取 page_timeout 是为了安全，虽然上面已经获取过了，但为了保持局部变量清晰
+                            page_timeout = int(os.getenv("PAGE_TIMEOUT", "60000"))
+                            english_timeout = max(10000, page_timeout // 2)
+                            await page.goto(english_url, wait_until='domcontentloaded', timeout=english_timeout)
                             visited_urls.add(english_url)
                             await asyncio.sleep(2)
                             
