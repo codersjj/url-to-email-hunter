@@ -40,9 +40,38 @@ const EmailExtractorApp = () => {
   const [fakePrefixes, setFakePrefixes] = useState<string[]>([]);
   const [showConfig, setShowConfig] = useState(false);
 
+  // Backend Configuration State
+  const [backendMode, setBackendMode] = useState<'online' | 'local'>('online');
+  const [onlineUrl, setOnlineUrl] = useState(process.env.NEXT_PUBLIC_ONLINE_API_URL || 'http://localhost:8888');
+  const [localUrl, setLocalUrl] = useState(process.env.NEXT_PUBLIC_LOCAL_API_URL || 'http://localhost:8888');
+  const [apiUrl, setApiUrl] = useState('');
+
+  // Initialize backend configuration from localStorage
   useEffect(() => {
-    // 获取配置信息
-    const apiUrl = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000';
+    const savedMode = localStorage.getItem('backendMode') as 'online' | 'local';
+    const savedOnlineUrl = localStorage.getItem('onlineUrl');
+    const savedLocalUrl = localStorage.getItem('localUrl');
+
+    const defaultOnlineUrl = process.env.NEXT_PUBLIC_ONLINE_API_URL || 'http://localhost:8888';
+
+    setBackendMode(savedMode || 'online');
+    setOnlineUrl(savedOnlineUrl || defaultOnlineUrl);
+    if (savedLocalUrl) setLocalUrl(savedLocalUrl);
+  }, []);
+  // Update API URL when configuration changes
+  useEffect(() => {
+    const newApiUrl = backendMode === 'local' ? localUrl : (onlineUrl || process.env.NEXT_PUBLIC_ONLINE_API_URL || 'http://localhost:8888');
+    console.log("🚀 ~ EmailExtractorApp ~ newApiUrl:", newApiUrl)
+    setApiUrl(newApiUrl);
+
+    // Save to localStorage
+    localStorage.setItem('backendMode', backendMode);
+    localStorage.setItem('onlineUrl', onlineUrl);
+    localStorage.setItem('localUrl', localUrl);
+  }, [backendMode, onlineUrl, localUrl]);
+  // Fetch config when apiUrl changes
+  useEffect(() => {
+    if (!apiUrl) return;
     fetch(`${apiUrl}/api/config`)
       .then(res => res.json())
       .then(data => {
@@ -51,7 +80,7 @@ const EmailExtractorApp = () => {
         }
       })
       .catch(err => console.error('获取配置失败:', err));
-  }, []);
+  }, [apiUrl]);
 
   useEffect(() => {
     const lines = urls.trim().split('\n').filter(line => line.trim());
@@ -70,20 +99,18 @@ const EmailExtractorApp = () => {
   };
 
   const connectWebSocket = () => {
-    // 自动根据当前页面协议生成 WebSocket 地址
-    const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
-    const apiUrl = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000';
+    if (!apiUrl) return null;
+    const protocol = apiUrl.startsWith('https') ? 'wss:' : 'ws:';
 
-    // 从 http://xxx:8000 → ws://xxx:8000 或 wss://xxx
-    const wsBase = apiUrl.replace(/^http/, 'ws');
-    const wsUrl = `${protocol}//${new URL(wsBase).host}/ws`;
+    // 处理 apiUrl 可能包含的协议头
+    let wsBase = apiUrl.replace(/^https?:\/\//, '');
 
-    console.log('Connecting to WebSocket:', wsUrl); // 调试用
-
+    const wsUrl = `${protocol}//${wsBase}/ws`;
+    console.log('Connecting to WebSocket:', wsUrl);
     const websocket = new WebSocket(wsUrl);
 
     websocket.onopen = () => {
-      addLog('WebSocket连接已建立', 'success');
+      addLog(`WebSocket连接已建立 (${backendMode === 'local' ? '本地' : '线上'})`, 'success');
     };
 
     websocket.onmessage = (event) => {
@@ -142,7 +169,7 @@ const EmailExtractorApp = () => {
     const urlList = urls.trim().split('\n').filter(line => line.trim());
 
     // 等待 WebSocket 连接建立后再发送消息
-    websocket.addEventListener('open', () => {
+    websocket?.addEventListener('open', () => {
       try {
         websocket.send(JSON.stringify({
           action: 'start',
@@ -323,7 +350,7 @@ const EmailExtractorApp = () => {
                     className="px-6 bg-gray-700 text-white py-3 rounded-lg font-medium hover:bg-gray-800 transition-all flex items-center justify-center gap-2 cursor-pointer"
                   >
                     <AlertCircle className="w-5 h-5" />
-                    过滤配置
+                    配置
                   </button>
                 </div>
               </div>
@@ -504,9 +531,9 @@ const EmailExtractorApp = () => {
       {/* Config Modal */}
       {showConfig && (
         <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
-          <div className="bg-white rounded-xl shadow-2xl p-6 w-full max-w-2xl max-h-[80vh] overflow-hidden flex flex-col">
+          <div className="bg-white rounded-xl shadow-2xl p-6 w-full max-w-2xl max-h-[90vh] overflow-hidden flex flex-col">
             <div className="flex items-center justify-between mb-4">
-              <h2 className="text-xl font-bold text-gray-800">过滤配置 (Fake Email Prefixes)</h2>
+              <h2 className="text-xl font-bold text-gray-800">系统配置</h2>
               <button
                 onClick={() => setShowConfig(false)}
                 className="text-gray-500 hover:text-gray-700 cursor-pointer"
@@ -514,23 +541,86 @@ const EmailExtractorApp = () => {
                 <EyeOff className="w-6 h-6" />
               </button>
             </div>
+            <div className="overflow-y-auto flex-1 space-y-6 p-1">
+              {/* Backend Configuration */}
+              <div className="bg-gray-50 p-4 rounded-lg border border-gray-200">
+                <h3 className="text-lg font-semibold text-gray-800 mb-3 flex items-center gap-2">
+                  <div className={`w-3 h-3 rounded-full ${backendMode === 'online' ? 'bg-green-500' : 'bg-blue-500'}`}></div>
+                  后端服务设置
+                </h3>
 
-            <div className="overflow-y-auto flex-1 p-4 bg-gray-50 rounded-lg border border-gray-200">
-              <div className="flex flex-wrap gap-2">
-                {fakePrefixes.map((prefix, index) => (
-                  <span key={index} className="px-3 py-1 bg-white border border-gray-300 rounded-full text-sm text-gray-700 shadow-sm">
-                    {prefix}
-                  </span>
-                ))}
+                <div className="flex gap-4 mb-4">
+                  <button
+                    onClick={() => setBackendMode('online')}
+                    className={`flex-1 py-2 px-4 rounded-lg font-medium transition-all ${backendMode === 'online'
+                      ? 'bg-indigo-600 text-white shadow-md'
+                      : 'bg-white text-gray-600 border border-gray-300 hover:bg-gray-50'
+                      }`}
+                  >
+                    线上环境 (Render)
+                  </button>
+                  <button
+                    onClick={() => setBackendMode('local')}
+                    className={`flex-1 py-2 px-4 rounded-lg font-medium transition-all ${backendMode === 'local'
+                      ? 'bg-indigo-600 text-white shadow-md'
+                      : 'bg-white text-gray-600 border border-gray-300 hover:bg-gray-50'
+                      }`}
+                  >
+                    本地环境 (Localhost)
+                  </button>
+                </div>
+                <div className="space-y-3">
+                  <div>
+                    <label className="block text-sm font-medium text-gray-700 mb-1">
+                      线上服务地址（包括端口）
+                    </label>
+                    <input
+                      type="text"
+                      value={onlineUrl}
+                      onChange={(e) => setOnlineUrl(e.target.value)}
+                      className="w-full p-2 border border-gray-300 rounded-md text-sm focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500"
+                      placeholder="https://your-app.onrender.com"
+                    />
+                  </div>
+                  <div>
+                    <label className="block text-sm font-medium text-gray-700 mb-1">
+                      本地服务地址（包括端口）
+                    </label>
+                    <input
+                      type="text"
+                      value={localUrl}
+                      onChange={(e) => setLocalUrl(e.target.value)}
+                      className="w-full p-2 border border-gray-300 rounded-md text-sm focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500"
+                      placeholder="http://localhost:8888"
+                    />
+                  </div>
+                </div>
+
+                <div className="mt-3 text-xs text-gray-500 flex items-center gap-1">
+                  <AlertCircle className="w-3 h-3" />
+                  当前生效: <span className="font-mono font-medium text-indigo-600">{apiUrl || '未设置'}</span>
+                </div>
+              </div>
+              {/* Fake Email Prefixes */}
+              <div className="bg-gray-50 p-4 rounded-lg border border-gray-200">
+                <h3 className="text-lg font-semibold text-gray-800 mb-3">
+                  过滤配置 (Fake Email Prefixes)
+                </h3>
+                <div className="flex flex-wrap gap-2 max-h-40 overflow-y-auto">
+                  {fakePrefixes.map((prefix, index) => (
+                    <span key={index} className="px-3 py-1 bg-white border border-gray-300 rounded-full text-sm text-gray-700 shadow-sm">
+                      {prefix}
+                    </span>
+                  ))}
+                </div>
               </div>
             </div>
-
-            <div className="mt-4 text-right">
+            <div className="mt-4 text-right border-t pt-4">
               <button
                 onClick={() => setShowConfig(false)}
                 className="px-6 py-2 bg-indigo-600 text-white rounded-lg hover:bg-indigo-700 transition-colors cursor-pointer"
               >
-                关闭
+                保存并关闭
               </button>
             </div>
           </div>

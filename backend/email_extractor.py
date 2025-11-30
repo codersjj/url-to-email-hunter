@@ -235,7 +235,53 @@ class EmailExtractor:
             logger.error(f"初始化失败: {e}", exc_info=True)
             await self.close()
             raise
-
+           # 错误分类辅助方法
+    def _categorize_error(self, error_str: str) -> tuple:
+        """分类错误类型并返回 (错误类型, 是否可重试, 建议延迟秒数)"""
+        error_lower = error_str.lower()
+        
+        # 网络连接错误 - 可重试
+        if any(keyword in error_lower for keyword in [
+            'err_socket_not_connected', 'err_connection_refused', 
+            'err_connection_reset', 'err_connection_closed',
+            'connection refused', 'socket', 'network'
+        ]):
+            return ('NETWORK_ERROR', True, 3)
+        
+        # 超时错误 - 可重试
+        if any(keyword in error_lower for keyword in [
+            'timeout', 'timed out', 'err_timed_out'
+        ]):
+            return ('TIMEOUT_ERROR', True, 2)
+        
+        # DNS错误 - 可重试
+        if any(keyword in error_lower for keyword in [
+            'dns', 'err_name_not_resolved', 'getaddrinfo failed'
+        ]):
+            return ('DNS_ERROR', True, 5)
+        
+        # CAPTCHA/反爬虫 - 需要代理
+        if any(keyword in error_lower for keyword in [
+            'captcha', 'robot', 'challenge', 'cloudflare'
+        ]):
+            return ('ANTI_SCRAPING', True, 1)
+        
+        # 服务器错误 - 可重试
+        if any(keyword in error_lower for keyword in [
+            '500', '502', '503', '504', 'server error'
+        ]):
+            return ('SERVER_ERROR', True, 5)
+        
+        # 客户端错误 - 不可重试
+        if any(keyword in error_lower for keyword in [
+            '400', '401', '403', '404', '405'
+        ]):
+            return ('CLIENT_ERROR', False, 0)
+        
+        # 未知错误 - 谨慎重试
+        return ('UNKNOWN_ERROR', True, 2)
+    
+    # 查找英文链接
     async def _find_english_link(self, page) -> str:
         """查找英文链接"""
         try:
@@ -306,16 +352,22 @@ class EmailExtractor:
             logger.error(f"页面提取失败: {str(e)}", exc_info=True)
             return set()
     
-    async def extract_from_url(self, url: str, callback=None, max_attempts: int = 2, context=None) -> dict:
+    # 从单个URL提取邮箱,返回详细结果
+    async def extract_from_url(self, url: str, callback=None, max_attempts: int = 3, context=None) -> dict:
         """从单个URL提取邮箱，返回详细结果"""
         emails = set()
         visited_urls = set()
         page = None
         error_message = None
+        error_type = None
         success = False
+        last_error = None
         
         # 使用传入的 context 或默认 context
         current_context = context or self.context
+        
+        # 获取重试超时倍数
+        retry_timeout_multiplier = float(os.getenv("RETRY_TIMEOUT_MULTIPLIER", "1.5"))
 
         for attempt in range(max_attempts):
             try:
@@ -327,7 +379,9 @@ class EmailExtractor:
                         'emails': list(emails),
                         'count': len(emails),
                         'success': False,
-                        'error': '用户停止'
+                        'error': '用户停止',
+                        'error_type': 'STOPPED',
+                        'attempts': attempt + 1
                     }
                 
                 # 检查浏览器上下文是否有效
@@ -338,7 +392,9 @@ class EmailExtractor:
                         'emails': list(emails),
                         'count': 0,
                         'success': False,
-                        'error': '浏览器上下文不存在'
+                        'error': '浏览器上下文不存在',
+                        'error_type': 'BROWSER_CONTEXT_MISSING',
+                        'attempts': attempt + 1
                     }
                 
                 # 显示当前尝试次数
@@ -350,16 +406,19 @@ class EmailExtractor:
                 page = await current_context.new_page()
                 self._pages.append(page)
                 
-                # 获取超时设置，默认为 60000ms (60秒)
-                # 在 Render 等慢速环境中，较长的超时时间可以减少因网络波动导致的失败
-                page_timeout = int(os.getenv("PAGE_TIMEOUT", "60000"))
+                # 获取超时设置,默认为 60000ms (60秒)
+                # 在 Render 等慢速环境中,较长的超时时间可以减少因网络波动导致的失败
+                base_timeout = int(os.getenv("PAGE_TIMEOUT", "60000"))
+                # 重试时增加超时时间
+                page_timeout = int(base_timeout * (retry_timeout_multiplier ** attempt))
+                logger.info(f"设置页面超时: {page_timeout}ms (尝试 {attempt + 1}/{max_attempts})")
                 page.set_default_timeout(page_timeout)
 
                 # 添加随机延迟
                 await asyncio.sleep(0.5 + (hash(url) % 10) / 10)
 
                 # 访问页面 - 使用更宽松的等待策略
-                # 移除 asyncio.wait_for，直接使用 Playwright 的 timeout，避免 Future exception was never retrieved 错误
+                # 移除 asyncio.wait_for,直接使用 Playwright 的 timeout,避免 Future exception was never retrieved 错误
                 await page.goto(url, wait_until='domcontentloaded', timeout=page_timeout)
                 
                 visited_urls.add(url)
@@ -372,9 +431,10 @@ class EmailExtractor:
                 except Exception as e:
                     logger.debug(f"网络空闲等待超时(这是正常的): {str(e)}")
                 
-                # 增加等待时间，让 JavaScript 有足够时间渲染内容
-                # 在生产环境中，资源受限可能导致 JS 执行较慢，但 3秒可能太长
+                # 增加等待时间,让 JavaScript 有足够时间渲染内容
+                # 在生产环境中,资源受限可能导致 JS 执行较慢,但 3秒可能太长
                 await asyncio.sleep(1)
+
 
                 if callback:
                     await callback('log', f"📄 页面加载完成: {url}", 'success')
@@ -403,6 +463,7 @@ class EmailExtractor:
                     
                     if is_captcha:
                         error_message = f"网站启用了反爬虫验证 (CAPTCHA/Robot Challenge)"
+                        error_type = 'ANTI_SCRAPING'
                         logger.warning(f"❌ {url} - {error_message}")
                         logger.warning(f"   检测到: 标题='{page_title}', URL包含验证码路径")
                         
@@ -423,7 +484,9 @@ class EmailExtractor:
                                 'emails': [],
                                 'count': 0,
                                 'success': False,
-                                'error': error_message
+                                'error': error_message,
+                                'error_type': error_type,
+                                'attempts': attempt + 1
                             }
                     
                 except Exception as e:
@@ -466,28 +529,38 @@ class EmailExtractor:
                 success = True
                 if attempt > 0 and callback:
                     await callback('log', f"✅ 重试成功 (第 {attempt + 1} 次尝试)", 'success')
-                break
-
+                # No break here, the finally block will handle the return on success
             except PlaywrightTimeout as e:
-                error_message = f"访问超时"
-                is_last_attempt = (attempt == max_attempts - 1)
-                current_attempt = attempt + 1
+                error_message = f"页面加载超时: {str(e)}"
+                last_error = error_message
+                error_type, should_retry, retry_delay = self._categorize_error(error_message)
                 
-                if is_last_attempt:
-                    logger.error(f"访问 {url} 最终失败: 超时 (第 {current_attempt}/{max_attempts} 次尝试)")
+                logger.warning(f"⏱️ [{error_type}] {url} - {error_message}")
+                logger.info(f"   错误分类: {error_type}, 可重试: {should_retry}, 建议延迟: {retry_delay}秒")
+                
+                if callback:
+                    await callback('log', f"⏱️ {url[:50]}... - 超时 (尝试 {attempt + 1}/{max_attempts})", 'warning')
+                
+                # 如果还有重试机会且错误可重试
+                if attempt < max_attempts - 1 and should_retry:
+                    logger.info(f"🔄 将在 {retry_delay} 秒后重试...")
                     if callback:
-                        await callback('log', f"❌ 访问失败: {url} - 超时 (第 {current_attempt}/{max_attempts} 次尝试)", 'error')
-                else:
-                    next_attempt = current_attempt + 1
-                    logger.warning(f"访问 {url} 第 {current_attempt} 次尝试超时，准备第 {next_attempt} 次尝试")
-                    if callback:
-                        await callback('log', f"⚠️ 第 {current_attempt} 次尝试超时，准备第 {next_attempt} 次尝试...", 'warning')
-                    await asyncio.sleep(2)
-                    
+                        await callback('log', f"🔄 等待 {retry_delay}秒后重试...", 'info')
+                    await asyncio.sleep(retry_delay)
+                
             except Exception as e:
                 error_message = str(e)
+                last_error = error_message
+                error_type, should_retry, retry_delay = self._categorize_error(error_message)
                 
-                # 检查是否是 CAPTCHA 触发的重试
+                logger.error(f"❌ [{error_type}] {url} - {error_message}")
+                logger.info(f"   错误详情: 类型={error_type}, 可重试={should_retry}, 建议延迟={retry_delay}秒")
+                logger.info(f"   当前尝试: {attempt + 1}/{max_attempts}")
+                
+                if callback:
+                    await callback('log', f"❌ 错误: {url[:50]}... - {error_type} (尝试 {attempt + 1}/{max_attempts})", 'error')
+                
+                # 如果是 CAPTCHA 触发的代理重试
                 if "CAPTCHA_DETECTED_RETRY_WITH_PROXY" in error_message and attempt == 0:
                     logger.info(f"🔄 检测到CAPTCHA，准备使用代理重试...")
                     
@@ -507,7 +580,8 @@ class EmailExtractor:
                     except Exception as retry_error:
                         logger.error(f"使用代理重试失败: {retry_error}")
                         error_message = f"代理重试失败: {str(retry_error)}"
-                        break
+                        error_type = 'PROXY_RETRY_FAILED'
+                        break # 代理重试失败，直接跳出
                     finally:
                         # 确保关闭临时上下文
                         if proxy_context:
@@ -515,41 +589,58 @@ class EmailExtractor:
                                 await proxy_context.close()
                             except:
                                 pass
-                else:
-                    logger.error(f"提取 {url} 出错: {str(e)}", exc_info=True)
-                    if callback:
-                        await callback('log', f"❌ 错误: {url} - {str(e)}", 'error')
-                    # 非CAPTCHA错误不重试，直接跳出
-                    break
                 
+                # 如果还有重试机会且错误可重试
+                if attempt < max_attempts - 1 and should_retry:
+                    logger.info(f"🔄 将在 {retry_delay} 秒后重试...")
+                    if callback:
+                        await callback('log', f"🔄 [{error_type}] 等待 {retry_delay}秒后重试...", 'info')
+                    await asyncio.sleep(retry_delay)
+                elif not should_retry:
+                    logger.warning(f"⚠️ 错误类型 {error_type} 不建议重试，跳过剩余尝试")
+                    if callback:
+                        await callback('log', f"⚠️ {error_type} - 不可重试，跳过", 'warning')
+                    break
+            
             finally:
-                # 确保页面被关闭
+                # 关闭页面
                 if page:
                     try:
-                        if not page.is_closed():
-                            await page.close()
-                            logger.debug(f"页面已关闭: {url}")
+                        await page.close()
                         if page in self._pages:
                             self._pages.remove(page)
-                    except Exception as e:
-                        logger.warning(f"关闭页面时出错: {e}")
-                        if page in self._pages:
-                            self._pages.remove(page)
-
-        # 最终结果日志
-        email_count = len(emails)
-        if callback and not success:  # 成功的情况在循环内已经处理
-            if email_count > 0:
-                await callback('log', f"⚠️ {url} - 部分成功，提取到 {email_count} 个邮箱", 'warning')
-            else:
-                await callback('log', f"❌ {url} - 失败: {error_message}", 'error')
-
+                    except:
+                        pass
+                
+                # 如果成功提取到邮箱，立即返回
+                if success:
+                    logger.info(f"✅ 成功从 {url} 提取到 {len(emails)} 个邮箱 (尝试 {attempt + 1}/{max_attempts})")
+                    return {
+                        'url': url,
+                        'emails': list(emails),
+                        'count': len(emails),
+                        'success': True,
+                        'error': None,
+                        'error_type': None,
+                        'attempts': attempt + 1
+                    }
+    
+        # 所有尝试都失败了
+        final_error = last_error or error_message or '未知错误'
+        logger.warning(f"❌ [{error_type or 'UNKNOWN'}] {url} - 所有 {max_attempts} 次尝试均失败")
+        logger.warning(f"   最终错误: {final_error}")
+        
+        if callback:
+            await callback('log', f"❌ {url[:50]}... - 失败 [{error_type or 'UNKNOWN'}]: {final_error[:50]}", 'error')
+        
         return {
             'url': url,
             'emails': list(emails),
-            'count': email_count,
-            'success': success,
-            'error': error_message if not success else None
+            'count': len(emails),
+            'success': False,
+            'error': final_error,
+            'error_type': error_type or 'UNKNOWN',
+            'attempts': max_attempts
         }
     
     async def extract_from_urls(self, urls: List[str], callback=None) -> dict:

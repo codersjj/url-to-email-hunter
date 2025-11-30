@@ -18,7 +18,6 @@ load_dotenv()
 # Get configuration from environment variables
 BACKEND_HOST = os.getenv("BACKEND_HOST", "0.0.0.0")
 BACKEND_PORT = int(os.getenv("PORT", os.getenv("BACKEND_PORT", "8000")))
-FRONTEND_URL = os.getenv("NEXT_PUBLIC_API_URL", "http://localhost:3000").replace(f":{BACKEND_PORT}", ":3000")
 USE_PROXY = os.getenv("USE_PROXY", "false").lower() == "true"
 logger.info(f"配置: USE_PROXY={USE_PROXY} (智能代理回退)")
 
