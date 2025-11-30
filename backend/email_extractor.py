@@ -108,6 +108,79 @@ class EmailExtractor:
         
         return valid_emails
 
+    async def _create_context(self, use_proxy: bool = False):
+        """创建并配置一个新的浏览器上下文"""
+        # 获取代理配置
+        proxy_config = None
+        if use_proxy and self.proxy_manager:
+            proxy = self.proxy_manager.get_random_proxy()
+            if proxy:
+                proxy_config = proxy
+                logger.info(f"✓ 使用代理: {proxy_config['server']}")
+            else:
+                logger.warning("⚠ 代理管理器未返回代理，使用直连")
+        
+        context = await self.browser.new_context(
+            viewport={'width': 1920, 'height': 1080},
+            locale="en-US",
+            timezone_id="America/New_York",
+            bypass_csp=True,
+            ignore_https_errors=True,
+            user_agent="Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36",
+            permissions=['geolocation'],
+            proxy=proxy_config,
+            extra_http_headers={
+                "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8,application/signed-exchange;v=b3;q=0.7",
+                "Accept-Language": "en-US,en;q=0.9",
+                "Accept-Encoding": "gzip, deflate, br, zstd",
+                "sec-ch-ua": '"Google Chrome";v="131", "Chromium";v="131", "Not_A Brand";v="24"',
+                "sec-ch-ua-mobile": "?0",
+                "sec-ch-ua-platform": '"Windows"',
+                "sec-fetch-dest": "document",
+                "sec-fetch-mode": "navigate",
+                "sec-fetch-site": "none",
+                "sec-fetch-user": "?1",
+                "upgrade-insecure-requests": "1",
+            },
+        )
+
+        # logger.info("应用 Stealth 插件...")
+        await Stealth().apply_stealth_async(context)
+
+        # 额外的 JavaScript 反检测
+        # logger.info("注入额外的反检测脚本...")
+        await context.add_init_script("""
+            // 覆盖 webdriver 属性
+            Object.defineProperty(navigator, 'webdriver', {
+                get: () => undefined
+            });
+            
+            // 覆盖 chrome 对象
+            window.chrome = {
+                runtime: {}
+            };
+            
+            // 覆盖 permissions
+            const originalQuery = window.navigator.permissions.query;
+            window.navigator.permissions.query = (parameters) => (
+                parameters.name === 'notifications' ?
+                    Promise.resolve({ state: Notification.permission }) :
+                    originalQuery(parameters)
+            );
+            
+            // 覆盖 plugins
+            Object.defineProperty(navigator, 'plugins', {
+                get: () => [1, 2, 3, 4, 5]
+            });
+            
+            // 覆盖 languages
+            Object.defineProperty(navigator, 'languages', {
+                get: () => ['en-US', 'en']
+            });
+        """)
+        
+        return context
+
     async def initialize(self, extension_path: str = None, use_proxy: bool = False):
         """初始化浏览器"""
         try:
@@ -136,81 +209,20 @@ class EmailExtractor:
                 args=args,
             )
 
-            logger.info("创建浏览器上下文...")
-            
-            # 获取代理配置 - 支持动态切换
-            proxy_config = None
-            if use_proxy and self.proxy_manager:
-                self.current_proxy = self.proxy_manager.get_random_proxy()
-                if self.current_proxy:
-                    proxy_config = self.current_proxy
-                    logger.info(f"✓ 使用代理: {proxy_config['server']}")
-                else:
-                    logger.warning("⚠ 代理管理器未返回代理，使用直连")
-            else:
-                if use_proxy:
-                    logger.warning("⚠ 请求使用代理但代理管理器未初始化，使用直连")
-                else:
-                    logger.info("⚠ 使用直连（不使用代理）")
-            
-            self.context = await self.browser.new_context(
-                viewport={'width': 1920, 'height': 1080},
-                locale="en-US",
-                timezone_id="America/New_York",
-                bypass_csp=True,
-                ignore_https_errors=True,
-                user_agent="Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36",
-                permissions=['geolocation'],
-                proxy=proxy_config,  # 应用代理配置
-                extra_http_headers={
-                    "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8,application/signed-exchange;v=b3;q=0.7",
-                    "Accept-Language": "en-US,en;q=0.9",
-                    "Accept-Encoding": "gzip, deflate, br, zstd",
-                    "sec-ch-ua": '"Google Chrome";v="131", "Chromium";v="131", "Not_A Brand";v="24"',
-                    "sec-ch-ua-mobile": "?0",
-                    "sec-ch-ua-platform": '"Windows"',
-                    "sec-fetch-dest": "document",
-                    "sec-fetch-mode": "navigate",
-                    "sec-fetch-site": "none",
-                    "sec-fetch-user": "?1",
-                    "upgrade-insecure-requests": "1",
-                },
-            )
+            logger.info("创建主浏览器上下文...")
+            self.context = await self._create_context(use_proxy=use_proxy)
 
-            logger.info("应用 Stealth 插件...")
-            await Stealth().apply_stealth_async(self.context)
-
-            # 额外的 JavaScript 反检测
-            logger.info("注入额外的反检测脚本...")
-            await self.context.add_init_script("""
-                // 覆盖 webdriver 属性
-                Object.defineProperty(navigator, 'webdriver', {
-                    get: () => undefined
-                });
-                
-                // 覆盖 chrome 对象
-                window.chrome = {
-                    runtime: {}
-                };
-                
-                // 覆盖 permissions
-                const originalQuery = window.navigator.permissions.query;
-                window.navigator.permissions.query = (parameters) => (
-                    parameters.name === 'notifications' ?
-                        Promise.resolve({ state: Notification.permission }) :
-                        originalQuery(parameters)
-                );
-                
-                // 覆盖 plugins
-                Object.defineProperty(navigator, 'plugins', {
-                    get: () => [1, 2, 3, 4, 5]
-                });
-                
-                // 覆盖 languages
-                Object.defineProperty(navigator, 'languages', {
-                    get: () => ['en-US', 'en']
-                });
-            """)
+            # 验证启动
+            test_page = await self.context.new_page()
+            await test_page.close()
+            
+            logger.info(f"浏览器初始化成功 (headless={self.headless})")
+            return self
+            
+        except Exception as e:
+            logger.error(f"初始化失败: {e}", exc_info=True)
+            await self.close()
+            raise
 
             # 验证启动
             test_page = await self.context.new_page()
@@ -294,13 +306,16 @@ class EmailExtractor:
             logger.error(f"页面提取失败: {str(e)}", exc_info=True)
             return set()
     
-    async def extract_from_url(self, url: str, callback=None, max_attempts: int = 2) -> dict:
+    async def extract_from_url(self, url: str, callback=None, max_attempts: int = 2, context=None) -> dict:
         """从单个URL提取邮箱，返回详细结果"""
         emails = set()
         visited_urls = set()
         page = None
         error_message = None
         success = False
+        
+        # 使用传入的 context 或默认 context
+        current_context = context or self.context
 
         for attempt in range(max_attempts):
             try:
@@ -316,7 +331,7 @@ class EmailExtractor:
                     }
                 
                 # 检查浏览器上下文是否有效
-                if not self.context:
+                if not current_context:
                     logger.error("浏览器上下文不存在,无法继续")
                     return {
                         'url': url,
@@ -332,7 +347,7 @@ class EmailExtractor:
                     attempt_msg = f"重试中 ({attempt_msg})"
                 logger.info(f"正在访问: {url} ({attempt_msg})")
                 
-                page = await self.context.new_page()
+                page = await current_context.new_page()
                 self._pages.append(page)
                 page.set_default_timeout(60000)
 
@@ -474,25 +489,30 @@ class EmailExtractor:
                 if "CAPTCHA_DETECTED_RETRY_WITH_PROXY" in error_message and attempt == 0:
                     logger.info(f"🔄 检测到CAPTCHA，准备使用代理重试...")
                     
-                    # 关闭当前浏览器上下文
+                    # 创建临时代理上下文
+                    proxy_context = None
                     try:
-                        await self.close()
-                        await asyncio.sleep(1)
-                    except:
-                        pass
-                    
-                    # 使用代理重新初始化
-                    try:
-                        await self.initialize(use_proxy=True)
-                        logger.info(f"✓ 已使用代理重新初始化浏览器")
+                        proxy_context = await self._create_context(use_proxy=True)
+                        logger.info(f"✓ 已创建临时代理上下文，重新尝试...")
                         if callback:
                             await callback('log', f"✓ 已切换到代理模式，重新尝试...", 'info')
-                        # 继续下一次循环（使用代理重试）
-                        continue
-                    except Exception as init_error:
-                        logger.error(f"使用代理重新初始化失败: {init_error}")
-                        error_message = f"代理初始化失败: {str(init_error)}"
+                        
+                        # 递归调用，使用新的上下文
+                        # 注意：这里我们只重试一次 (max_attempts=1)，或者根据需要调整
+                        retry_result = await self.extract_from_url(url, callback, max_attempts=max_attempts, context=proxy_context)
+                        return retry_result
+                        
+                    except Exception as retry_error:
+                        logger.error(f"使用代理重试失败: {retry_error}")
+                        error_message = f"代理重试失败: {str(retry_error)}"
                         break
+                    finally:
+                        # 确保关闭临时上下文
+                        if proxy_context:
+                            try:
+                                await proxy_context.close()
+                            except:
+                                pass
                 else:
                     logger.error(f"提取 {url} 出错: {str(e)}", exc_info=True)
                     if callback:
@@ -531,64 +551,78 @@ class EmailExtractor:
         }
     
     async def extract_from_urls(self, urls: List[str], callback=None) -> dict:
-        """批量提取邮箱，返回详细统计信息"""
+        """批量提取邮箱，返回详细统计信息 (并行版)"""
         all_emails = set()
         total = len(urls)
         failed_urls = []
         no_email_urls = []
         
-        logger.info(f"开始批量提取 {total} 个URL")
+        # 线程安全的锁
+        results_lock = asyncio.Lock()
         
-        for index, url in enumerate(urls):
-            # 检查暂停/停止
-            while self.paused and not self.stopped:
-                await asyncio.sleep(0.5)
-            
-            if self.stopped:
+        logger.info(f"开始批量提取 {total} 个URL (并行)")
+        
+        # 限制并发数
+        sem = asyncio.Semaphore(5)
+        
+        async def process_url(index, url):
+            async with sem:
+                # 检查暂停/停止
+                while self.paused and not self.stopped:
+                    await asyncio.sleep(0.5)
+                
+                if self.stopped:
+                    return
+                
+                logger.info(f"📊 开始处理: {url}")
                 if callback:
-                    await callback('log', '提取已停止', 'warning')
-                break
-            
-            logger.info(f"📊 处理进度: {index + 1}/{total} - {url}")
-            
-            if callback:
-                await callback('log', f"🔍 正在处理 [{index + 1}/{total}]: {url[:50]}...", 'info')
-            
-            # 提取邮箱
-            try:
-                result = await self.extract_from_url(url, callback)
+                    await callback('log', f"🔍 正在处理: {url[:50]}...", 'info')
                 
-                # 更新总邮箱列表
-                all_emails.update(result['emails'])
-                
-                # 跟踪失败和无邮箱的URL
-                if not result['success']:
-                    failed_urls.append({
-                        'url': url,
-                        'error': result['error'] or '未知错误',
-                        'timestamp': time.time()
-                    })
-                elif result['count'] == 0:
-                    no_email_urls.append({
-                        'url': url,
-                        'timestamp': time.time()
-                    })
+                try:
+                    result = await self.extract_from_url(url, callback)
                     
-            except Exception as e:
-                logger.error(f"处理 {url} 时出错: {e}")
-                failed_urls.append({
-                    'url': url,
-                    'error': str(e),
-                    'timestamp': time.time()
-                })
-                if callback:
-                    await callback('log', f"❌ 跳过 {url}: {str(e)}", 'error')
-            
-            # 更新进度
-            progress = int((index + 1) / total * 100)
-            if callback:
-                await callback('progress', progress)
+                    async with results_lock:
+                        # 更新总邮箱列表
+                        all_emails.update(result['emails'])
+                        
+                        # 跟踪失败和无邮箱的URL
+                        if not result['success']:
+                            failed_urls.append({
+                                'url': url,
+                                'error': result['error'] or '未知错误',
+                                'timestamp': time.time()
+                            })
+                        elif result['count'] == 0:
+                            no_email_urls.append({
+                                'url': url,
+                                'timestamp': time.time()
+                            })
+                except Exception as e:
+                    logger.error(f"处理 {url} 时出错: {e}")
+                    async with results_lock:
+                        failed_urls.append({
+                            'url': url,
+                            'error': str(e),
+                            'timestamp': time.time()
+                        })
+                    if callback:
+                        await callback('log', f"❌ 跳过 {url}: {str(e)}", 'error')
+                
+                # 更新进度 (近似)
+                # 注意：并发环境下进度条可能不会严格线性增加，但最终会达到100%
+                # 这里简单处理：每完成一个任务，发送一次进度更新
+                # 为了计算准确进度，我们需要知道已完成的任务数
+                # 但为了简化，我们可以不在这里发送精确进度，或者使用一个共享计数器
+                
+        # 创建任务列表
+        tasks = [process_url(i, url) for i, url in enumerate(urls)]
         
+        # 运行所有任务
+        await asyncio.gather(*tasks)
+        
+        if callback:
+             await callback('progress', 100)
+
         # 发送统计信息
         if callback:
             await callback('failed_urls', failed_urls)
@@ -598,7 +632,6 @@ class EmailExtractor:
             await callback('log', f"✅ 提取完成!共 {len(all_emails)} 个唯一邮箱", 'success')
             await callback('log', f"📊 统计: 成功 {total - len(failed_urls)} 个, 失败 {len(failed_urls)} 个, 无邮箱 {len(no_email_urls)} 个", 'info')
 
-        
         logger.info(f"批量提取完成: {len(all_emails)} 个邮箱, {len(failed_urls)} 个失败, {len(no_email_urls)} 个无邮箱")
         
         return {
