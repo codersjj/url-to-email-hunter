@@ -6,7 +6,8 @@
     "dev": "next dev",
     "build": "next build",
     "start": "next start",
-    "lint": "eslint"
+    "lint": "eslint",
+    "backend": "pip install -r backend/requirements.txt && python backend/main.py"
   },
   "dependencies": {
     "lucide-react": "^0.555.0",

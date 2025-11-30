@@ -1,36 +1,102 @@
-This is a [Next.js](https://nextjs.org) project bootstrapped with [`create-next-app`](https://nextjs.org/docs/app/api-reference/cli/create-next-app).
+# URL to Email Hunter
+
+A powerful full-stack application designed to crawl websites and extract email addresses efficiently. Built with Next.js for the frontend and FastAPI with Playwright for the backend.
+
+## Features
+
+- **URL Crawling**: Automatically crawls provided URLs to find contact pages.
+- **Email Extraction**: Uses intelligent patterns to extract email addresses from web pages.
+- **Real-time Logs**: View extraction progress and logs in real-time on the dashboard.
+- **Data Export**: Export extracted emails and failed URLs to Excel files.
+- **Proxy Support**: Integrated proxy management for reliable crawling.
+- **Parallel Processing**: Supports parallel extraction for faster results.
+
+## Tech Stack
+
+- **Frontend**: [Next.js](https://nextjs.org/), React, Tailwind CSS, Lucide React
+- **Backend**: [FastAPI](https://fastapi.tiangolo.com/), Python
+- **Scraping**: [Playwright](https://playwright.dev/python/)
+- **Utilities**: Pandas, OpenPyXL
+
+## Prerequisites
+
+Before you begin, ensure you have the following installed:
+
+- [Node.js](https://nodejs.org/) (v18 or higher)
+- [Python](https://www.python.org/) (v3.8 or higher)
 
 ## Getting Started
 
-First, run the development server:
+### 1. Clone the Repository
+
+```bash
+git clone <repository-url>
+cd url-to-email-hunter
+```
+
+### 2. Frontend Setup
+
+Install the frontend dependencies:
+
+```bash
+npm install
+# or
+yarn install
+# or
+pnpm install
+```
+
+Start the frontend development server:
 
 ```bash
 npm run dev
-# or
-yarn dev
-# or
-pnpm dev
-# or
-bun dev
 ```
 
-Open [http://localhost:3000](http://localhost:3000) with your browser to see the result.
+The frontend will be available at [http://localhost:3000](http://localhost:3000).
 
-You can start editing the page by modifying `app/page.tsx`. The page auto-updates as you edit the file.
+### 3. Backend Setup
 
-This project uses [`next/font`](https://nextjs.org/docs/app/building-your-application/optimizing/fonts) to automatically optimize and load [Geist](https://vercel.com/font), a new font family for Vercel.
+The project includes a convenient script to set up and run the backend automatically.
 
-## Learn More
+Run the following command from the project root:
 
-To learn more about Next.js, take a look at the following resources:
+```bash
+npm run backend
+```
 
-- [Next.js Documentation](https://nextjs.org/docs) - learn about Next.js features and API.
-- [Learn Next.js](https://nextjs.org/learn) - an interactive Next.js tutorial.
+This command will:
+1.  Install the required Python dependencies from `backend/requirements.txt`.
+2.  Start the FastAPI backend server.
 
-You can check out [the Next.js GitHub repository](https://github.com/vercel/next.js) - your feedback and contributions are welcome!
+Alternatively, you can set it up manually:
 
-## Deploy on Vercel
+```bash
+# Install dependencies
+pip install -r backend/requirements.txt
 
-The easiest way to deploy your Next.js app is to use the [Vercel Platform](https://vercel.com/new?utm_medium=default-template&filter=next.js&utm_source=create-next-app&utm_campaign=create-next-app-readme) from the creators of Next.js.
+# Run the backend
+python backend/main.py
+```
 
-Check out our [Next.js deployment documentation](https://nextjs.org/docs/app/building-your-application/deploying) for more details.
+The backend API will be available at `http://localhost:8000` (or the port configured in `main.py`).
+
+## Usage
+
+1.  Open the application in your browser at [http://localhost:3000](http://localhost:3000).
+2.  Enter the URLs you want to scan in the input area (one per line).
+3.  Click the "Start Extraction" button.
+4.  Monitor the progress in the "Real-time Logs" section.
+5.  Once completed, you can export the results using the "Export" buttons.
+
+## Project Structure
+
+- `app/`: Next.js frontend application code.
+- `backend/`: Python FastAPI backend code.
+    - `main.py`: Entry point for the backend API.
+    - `email_extractor.py`: Core logic for email extraction.
+    - `requirements.txt`: Python dependencies.
+- `public/`: Static assets.
+
+## License
+
+[MIT](LICENSE)
