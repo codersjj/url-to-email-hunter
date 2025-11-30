@@ -562,10 +562,18 @@ class EmailExtractor:
         
         logger.info(f"开始批量提取 {total} 个URL (并行)")
         
+        start_time = time.time()
+        
         # 限制并发数
-        sem = asyncio.Semaphore(5)
+        sem = asyncio.Semaphore(20)
+        
+        # 进度计数器
+        completed_count = 0
+        progress_lock = asyncio.Lock()
         
         async def process_url(index, url):
+            nonlocal completed_count
+            
             async with sem:
                 # 检查暂停/停止
                 while self.paused and not self.stopped:
@@ -607,12 +615,14 @@ class EmailExtractor:
                         })
                     if callback:
                         await callback('log', f"❌ 跳过 {url}: {str(e)}", 'error')
-                
-                # 更新进度 (近似)
-                # 注意：并发环境下进度条可能不会严格线性增加，但最终会达到100%
-                # 这里简单处理：每完成一个任务，发送一次进度更新
-                # 为了计算准确进度，我们需要知道已完成的任务数
-                # 但为了简化，我们可以不在这里发送精确进度，或者使用一个共享计数器
+                finally:
+                    # 更新进度
+                    async with progress_lock:
+                        completed_count += 1
+                        current_progress = int(completed_count / total * 100)
+                    
+                    if callback:
+                        await callback('progress', current_progress)
                 
         # 创建任务列表
         tasks = [process_url(i, url) for i, url in enumerate(urls)]
@@ -620,26 +630,28 @@ class EmailExtractor:
         # 运行所有任务
         await asyncio.gather(*tasks)
         
-        if callback:
-             await callback('progress', 100)
-
         # 发送统计信息
         if callback:
             await callback('failed_urls', failed_urls)
             await callback('no_email_urls', no_email_urls)
         
+        end_time = time.time()
+        duration = end_time - start_time
+        duration_str = f"{duration:.2f}秒"
+        
         if callback and not self.stopped:
             await callback('log', f"✅ 提取完成!共 {len(all_emails)} 个唯一邮箱", 'success')
-            await callback('log', f"📊 统计: 成功 {total - len(failed_urls)} 个, 失败 {len(failed_urls)} 个, 无邮箱 {len(no_email_urls)} 个", 'info')
+            await callback('log', f"📊 统计: 成功 {total - len(failed_urls)} 个, 失败 {len(failed_urls)} 个, 无邮箱 {len(no_email_urls)} 个. 总耗时: {duration_str}", 'info')
 
-        logger.info(f"批量提取完成: {len(all_emails)} 个邮箱, {len(failed_urls)} 个失败, {len(no_email_urls)} 个无邮箱")
+        logger.info(f"批量提取完成: {len(all_emails)} 个邮箱, {len(failed_urls)} 个失败, {len(no_email_urls)} 个无邮箱, 耗时: {duration_str}")
         
         return {
             'emails': list(all_emails),
             'failed_urls': failed_urls,
             'no_email_urls': no_email_urls,
             'total_processed': total,
-            'total_emails': len(all_emails)
+            'total_emails': len(all_emails),
+            'duration': duration
         }
     
     def pause(self):
