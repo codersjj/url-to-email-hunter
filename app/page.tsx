@@ -5,6 +5,12 @@ import { Upload, Download, Play, Pause, Trash2, Eye, EyeOff, Mail, CheckCircle, 
 import * as XLSX from 'xlsx';
 import StatsPanel from './components/stats-panel';
 
+interface DeduplicatedUrl {
+  url: string;
+  reason: string;
+  timestamp: number;
+}
+
 interface LogEntry {
   timestamp: string;
   message: string;
@@ -34,6 +40,7 @@ const EmailExtractorApp = () => {
   const [ws, setWs] = useState<WebSocket | null>(null);
   const [failedUrls, setFailedUrls] = useState<FailedUrl[]>([]);
   const [noEmailUrls, setNoEmailUrls] = useState<NoEmailUrl[]>([]);
+  const [deduplicatedUrls, setDeduplicatedUrls] = useState<DeduplicatedUrl[]>([]);
 
   const logsContainerRef = useRef<HTMLDivElement>(null);
 
@@ -73,13 +80,31 @@ const EmailExtractorApp = () => {
   useEffect(() => {
     if (!apiUrl) return;
     fetch(`${apiUrl}/api/config`)
-      .then(res => res.json())
-      .then(data => {
-        if (data.fake_email_prefixes) {
-          setFakePrefixes(data.fake_email_prefixes);
+      .then(res => {
+        // 检查Content-Type
+        const contentType = res.headers.get('content-type');
+
+        if (contentType && contentType.includes('application/json')) {
+          // 如果是JSON，直接解析
+          return res.json().then(data => {
+            if (data.fake_email_prefixes) {
+              setFakePrefixes(data.fake_email_prefixes);
+            }
+          });
+        } else {
+          // 如果不是JSON，可能是HTML或其他内容
+          return res.text().then(text => {
+            console.log("收到非JSON响应:", text.substring(0, 100));
+            // 处理非JSON情况，比如重定向到错误页面或使用默认值
+            setFakePrefixes([]); // 设置默认值
+          });
         }
       })
-      .catch(err => console.error('获取配置失败:', err));
+      .catch(err => {
+        console.error('获取配置失败:', err);
+        // 网络错误等异常情况处理
+        setFakePrefixes([]); // 设置默认值
+      });
   }, [apiUrl]);
 
   useEffect(() => {
@@ -103,7 +128,7 @@ const EmailExtractorApp = () => {
     const protocol = apiUrl.startsWith('https') ? 'wss:' : 'ws:';
 
     // 处理 apiUrl 可能包含的协议头
-    let wsBase = apiUrl.replace(/^https?:\/\//, '');
+    const wsBase = apiUrl.replace(/^https?:\/\//, '');
 
     const wsUrl = `${protocol}//${wsBase}/ws`;
     console.log('Connecting to WebSocket:', wsUrl);
@@ -131,6 +156,8 @@ const EmailExtractorApp = () => {
         setFailedUrls(data.failed_urls || []);
       } else if (data.type === 'no_email_urls') {
         setNoEmailUrls(data.no_email_urls || []);
+      } else if (data.type === 'deduplicated_urls') {
+        setDeduplicatedUrls(data.deduplicated_urls || []);
       } else if (data.type === 'complete') {
         addLog(data.message || '任务完成', 'success');
         setIsExtracting(false);
@@ -162,6 +189,7 @@ const EmailExtractorApp = () => {
     setEmails([]);
     setFailedUrls([]);
     setNoEmailUrls([]);
+    setDeduplicatedUrls([]);
     addLog('开始提取流程...', 'info');
 
     const websocket = connectWebSocket();
@@ -268,6 +296,19 @@ const EmailExtractorApp = () => {
     addLog(`已导出 ${noEmailUrls.length} 个无邮箱URL到Excel`, 'success');
   };
 
+  const exportDeduplicatedUrlsToExcel = () => {
+    const data = deduplicatedUrls.map(item => ({
+      'URL': item.url,
+      '原因': item.reason,
+      '时间戳': new Date(item.timestamp * 1000).toLocaleString('zh-CN')
+    }));
+    const worksheet = XLSX.utils.json_to_sheet(data);
+    const workbook = XLSX.utils.book_new();
+    XLSX.utils.book_append_sheet(workbook, worksheet, "Deduplicated URLs");
+    XLSX.writeFile(workbook, `deduplicated_urls_${Date.now()}.xlsx`);
+    addLog(`已导出 ${deduplicatedUrls.length} 个重复URL到Excel`, 'success');
+  };
+
   return (
     <div className="min-h-screen bg-gradient-to-br from-blue-50 via-indigo-50 to-purple-50 p-6">
       <div className="max-w-7xl mx-auto">
@@ -314,7 +355,7 @@ const EmailExtractorApp = () => {
                     <Play className="w-5 h-5" />
                     开始提取
                   </button>
-                  {isExtracting && (
+                  {/* {isExtracting && (
                     <button
                       onClick={pauseExtraction}
                       className="px-6 bg-yellow-500 text-white py-3 rounded-lg font-medium hover:bg-yellow-600 transition-all flex items-center gap-2 cursor-pointer"
@@ -322,7 +363,7 @@ const EmailExtractorApp = () => {
                       <Pause className="w-5 h-5" />
                       {isPaused ? '继续' : '暂停'}
                     </button>
-                  )}
+                  )} */}
                 </div>
 
                 <div className="flex gap-3">
@@ -476,6 +517,32 @@ const EmailExtractorApp = () => {
               </div>
             )}
 
+            {/* Deduplicated URLs Section */}
+            {deduplicatedUrls.length > 0 && (
+              <div className="bg-white rounded-xl shadow-lg p-6">
+                <div className="flex items-center justify-between mb-4">
+                  <h2 className="text-xl font-semibold text-blue-600">已过滤的重复 URL</h2>
+                  <span className="px-3 py-1 bg-blue-100 text-blue-700 rounded-full text-sm font-medium">
+                    {deduplicatedUrls.length} 个
+                  </span>
+                </div>
+                <div className="bg-blue-50 rounded-lg p-4 h-32 overflow-y-auto mb-4 text-sm">
+                  {deduplicatedUrls.map((item, index) => (
+                    <div key={index} className="mb-2 last:mb-0 border-b border-blue-100 last:border-0 pb-2 last:pb-0">
+                      <div className="font-medium text-blue-800 truncate">{item.url}</div>
+                      <div className="text-blue-500 text-xs mt-1">{item.reason}</div>
+                    </div>
+                  ))}
+                </div>
+                <button
+                  onClick={exportDeduplicatedUrlsToExcel}
+                  className="w-full bg-blue-500 text-white py-2 rounded-lg font-medium hover:bg-blue-600 transition-all flex items-center justify-center gap-2 cursor-pointer"
+                >
+                  <Download className="w-4 h-4" />
+                  导出重复记录
+                </button>
+              </div>
+            )}
             {/* Results */}
             <div className="bg-white rounded-xl shadow-lg p-6">
               <div className="flex items-center justify-between mb-4">

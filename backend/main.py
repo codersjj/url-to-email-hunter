@@ -136,6 +136,7 @@ async def websocket_endpoint(websocket: WebSocket):
                                 'progress': data if msg_type == 'progress' else None,
                                 'failed_urls': data if msg_type == 'failed_urls' else None,
                                 'no_email_urls': data if msg_type == 'no_email_urls' else None,
+                                'deduplicated_urls': data if msg_type == 'deduplicated_urls' else None,
                             })
                         except Exception as e:
                             logger.error(f"发送消息失败: {e}")
